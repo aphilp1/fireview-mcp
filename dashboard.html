@@ -112,6 +112,21 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
 #legend h3{font-family:"Space Grotesk";font-weight:600;font-size:12px;letter-spacing:.04em;margin:0 0 10px;color:var(--ink);display:flex;align-items:center;gap:8px}
 #legend h3 .sq{width:8px;height:8px;border-radius:2px;background:var(--amber)}
+#nexradLegendPanel h3{font-family:"Space Grotesk";font-weight:600;font-size:11px;letter-spacing:.04em;margin:0 0 8px;color:var(--ink);display:flex;align-items:center;gap:8px;cursor:move;user-select:none}
+#nexradLegendPanel h3 .sq{width:8px;height:8px;border-radius:2px}
+.nexrad-legend-sub{margin-bottom:8px}
+.nexrad-legend-sub:last-child{margin-bottom:0}
+.nexrad-legend-label{font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink);opacity:.75;margin-bottom:4px}
+/* Rendered at its real 500x30 native size, NOT scaled down to fit a narrow
+   panel -- NOAA's legend text (the dBZ/kt numbers) is baked directly into
+   the raster image at that fixed resolution, so shrinking it via CSS
+   shrank that embedded text below legibility. This is also why the panel
+   itself is sized to fit the image, not the other way around. Confirmed
+   live this isn't a rescalable SLD legend either: requesting a larger size
+   (1000x60) just crops into a fixed-resolution source instead of scaling
+   it up, so bigger isn't available -- 500x30 is the one size NOAA actually
+   renders correctly. */
+.nexrad-legend-sub img{width:500px;height:30px;display:block;border-radius:4px}
 .layer{display:flex;align-items:center;gap:9px;padding:3px 0;cursor:pointer;user-select:none}
 .layer input{appearance:none;width:15px;height:15px;border:1.5px solid var(--line-2);border-radius:4px;cursor:pointer;position:relative;flex:none;transition:all .15s;background:transparent}
 .layer input:checked{background:var(--aqua);border-color:var(--aqua)}
@@ -254,6 +269,19 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
         <div id="satLabel" class="layerGroupLabel"></div>
         <div id="satLayers"></div>
         <div id="statCount">loading stations…</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" id="nexradLegendPanel" style="display:none;bottom:60px;right:14px;width:528px;padding:10px 14px">
+      <h3><span class="sq" style="background:var(--sky)"></span><span class="panel-title-text">NEXRAD LEGEND</span></h3>
+      <div class="panel-body">
+        <div id="nexradLegendRefl" class="nexrad-legend-sub" hidden>
+          <div class="nexrad-legend-label">Reflectivity (dBZ)</div>
+          <img>
+        </div>
+        <div id="nexradLegendVel" class="nexrad-legend-sub" hidden>
+          <div class="nexrad-legend-label">Velocity (kt)</div>
+          <img>
         </div>
       </div>
     </div>
@@ -426,6 +454,29 @@ setQueryArmed(true);
   h3.addEventListener('pointerup', ()=>{ dragging = false; });
 })();
 
+// ---- NEXRAD LEGEND panel: draggable by its header, same convention as the
+// Sensor Systems panel above -- per the user's ask to be able to move it
+// around. Visibility itself is owned by updateNexradLegendPanel(), not here. ----
+(function setupNexradLegendPanel(){
+  const panel = document.getElementById('nexradLegendPanel');
+  const h3 = panel.querySelector('h3');
+  let dragging = false, startX, startY, startLeft, startTop;
+  h3.addEventListener('pointerdown', e=>{
+    const rect = panel.getBoundingClientRect();
+    panel.style.left = rect.left+'px'; panel.style.top = rect.top+'px';
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+    startX = e.clientX; startY = e.clientY; startLeft = rect.left; startTop = rect.top;
+    dragging = true;
+    h3.setPointerCapture(e.pointerId);
+  });
+  h3.addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    panel.style.left = (startLeft + (e.clientX - startX))+'px';
+    panel.style.top = (startTop + (e.clientY - startY))+'px';
+  });
+  h3.addEventListener('pointerup', ()=>{ dragging = false; });
+})();
+
 // Real satellite tiles need their own pane -- the dark-mode CSS filter
 // (invert+hue-rotate, see .leaflet-tile-pane above) is meant only to turn
 // OSM's light basemap dark. Leaflet puts ALL tile layers in the same shared
@@ -443,7 +494,7 @@ map.getPane('goesPane').style.zIndex = 350; // above tiles(200), below overlays(
 // (verified: clicking CLEAR fired a stray point query in the Aleutians, at
 // whatever lat/lon happened to be under that screen pixel). Tell Leaflet to
 // stop click/scroll events on these from ever reaching the map itself.
-['sidebar','err','pointCard','empty','searchErr','loading'].forEach(id=>{
+['sidebar','err','pointCard','empty','searchErr','loading','nexradLegendPanel'].forEach(id=>{
   const el = document.getElementById(id);
   if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); }
 });
@@ -615,10 +666,31 @@ function makeNexradWmsLayer(s, product){
     attribution: 'NOAA single-site radar / '+s.id
   });
 }
+const NEXRAD_LEGEND_META = {bref: {id:'nexradLegendRefl', label:'Reflectivity (dBZ)'}, bvel: {id:'nexradLegendVel', label:'Velocity (kt)'}};
+// GetLegendGraphic silently returns a near-empty 144-byte blank image at
+// non-standard sizes (e.g. the old 300x22 this used to request) -- 500x30
+// is the exact size NOAA's own GetCapabilities advertises for these legend
+// styles, confirmed live to return a real 5-6KB colored scale image.
+function updateNexradLegendPanel(key, sid, checked){
+  const meta = NEXRAD_LEGEND_META[key];
+  const sub = document.getElementById(meta.id);
+  if(checked && sid){
+    sub.querySelector('img').src = 'https://opengeo.ncep.noaa.gov/geoserver/'+sid+'/wms?request=GetLegendGraphic&version=1.1.1&format=image%2Fpng&width=500&height=30&layer='+sid+'_sr_'+key;
+    sub.hidden = false;
+  } else {
+    sub.hidden = true;
+  }
+  const anyVisible = Object.values(NEXRAD_LEGEND_META).some(m=>!document.getElementById(m.id).hidden);
+  document.getElementById('nexradLegendPanel').style.display = anyVisible ? 'block' : 'none';
+}
 function renderNexradLayers(nexrad, distLabel, targetLayerGroup){
   const el = document.getElementById('nexradLayers');
   el.innerHTML = '';
   const stations = nexrad || [];
+  // Fresh query -- both product checkboxes reset to unchecked below, so the
+  // standalone legend panel resets with them rather than showing stale data.
+  updateNexradLegendPanel('bref', null, false);
+  updateNexradLegendPanel('bvel', null, false);
 
   // Real station markers within 100mi -- always shown, even at a real
   // zero, matching every other layer's convention in this panel (Active
@@ -647,24 +719,15 @@ function renderNexradLayers(nexrad, distLabel, targetLayerGroup){
       '<span class="lbl">'+label+'</span><input type="checkbox" style="margin-left:auto"'+(stations.length?'':' disabled')+'>';
     const checkbox = row.querySelector('input');
     const entry = {label, layers:[], checkbox};
-    // Real legend, straight from NOAA's own WMS GetLegendGraphic for this
-    // exact layer/style -- not a color scale I guessed at. the user asked to
-    // "add a color legend" for NEXRAD.
-    const legendImg = document.createElement('img');
-    // hidden alone (no inline display here) -- an inline display:block used
-    // to fight the [hidden] UA rule and win on specificity, so this legend
-    // rendered squished-thin at all times regardless of the checkbox state.
-    // That was the real "line" between the Reflectivity/Velocity rows.
-    legendImg.hidden = true;
-    legendImg.style.cssText = 'width:100%;margin:2px 0 4px;border-radius:3px';
-    if(stations.length){
-      const sid = stations[0].id.toLowerCase();
-      legendImg.src = 'https://opengeo.ncep.noaa.gov/geoserver/'+sid+'/wms?request=GetLegendGraphic&version=1.1.1&format=image%2Fpng&width=300&height=22&layer='+sid+'_sr_'+key;
-    }
+    const sid = stations.length ? stations[0].id.toLowerCase() : null;
     checkbox.addEventListener('change', e=>{
       entry.layers.forEach(o=>targetLayerGroup.removeLayer(o));
       entry.layers = [];
-      legendImg.hidden = !e.target.checked;
+      // Real color-scale legend, straight from NOAA's own WMS
+      // GetLegendGraphic -- lives in the standalone, always-visible,
+      // draggable #nexradLegendPanel on the map now, not a swatch buried in
+      // this sidebar row (moved there per the user's explicit ask).
+      updateNexradLegendPanel(key, sid, e.target.checked);
       if(e.target.checked){
         entry.layers = stations.map(s=>makeNexradWmsLayer(s, key).addTo(targetLayerGroup));
         return;
@@ -674,7 +737,6 @@ function renderNexradLayers(nexrad, distLabel, targetLayerGroup){
       if(nexradAnim && nexradAnim.productKey===key) nexradAnimStop();
     });
     el.appendChild(row);
-    el.appendChild(legendImg);
     nexradProductState[key] = entry;
   });
 
