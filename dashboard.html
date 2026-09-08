@@ -1,0 +1,2039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FireView — Live Sensor Feeds</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23050b12'/%3E%3Cpath fill='%23ff8a3d' d='M12 3c-1.2 3-4.5 4.8-4.5 9a4.5 4.5 0 0 0 9 0c0-1.6-.8-2.6-1.3-3.6.6 2.7-.9 4.1-2.2 4.1-1.4 0-2.3-1.2-2.3-2.7 0-2.4 1.8-3.6 1.3-6.8z'/%3E%3Cpath fill='%23ffcf5c' d='M12 21c2.8 0 5-2.2 5-5 0-1.7-.9-2.9-1.7-4 .3 1.7-.6 2.8-1.7 2.8-1 0-1.8-.8-1.8-2 0-1.4 1-2.1.9-3.8-2 1.6-3.7 4-3.7 7 0 2.8 2.2 5 5 5z'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"></script>
+<style>
+:root{
+  --abyss:#050b12; --water:#071420; --land:#16242f; --deep:#0a1722; --panel:#0d1c29;
+  --line:rgba(120,160,180,.4); --line-2:rgba(120,160,180,.55);
+  --ink:#e9eef3; --slate:#93a7b6; --mute:#5f7585;
+  --aqua:#46cfd6; --amber:#ff8a3d; --amber-soft:#ffb27a; --coral:#ff5d6c;
+  --calm:#46cfd6; --mod:#ffcf5c; --high:#ff8a3d; --extreme:#ff5d6c;
+  --violet:#b98cf0; --lime:#9fe66d; --gold:#ffcf5c; --sky:#5b9dd9;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--abyss);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-weight:300}
+.mono{font-family:"IBM Plex Mono",monospace}
+#app{position:fixed;inset:0;display:flex;flex-direction:column}
+header{
+  display:flex;align-items:center;gap:14px;padding:11px 18px;z-index:1000;
+  background:linear-gradient(180deg,rgba(5,11,18,.96),rgba(5,11,18,.78));
+  border-bottom:1px solid var(--line);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+}
+.brand{display:flex;align-items:center;gap:10px;font-family:"Space Grotesk";font-weight:700;letter-spacing:.04em;font-size:14px}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3px rgba(255,138,61,.16),0 0 14px 2px rgba(255,138,61,.5);animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.brand small{display:block;font-family:"IBM Plex Mono";font-weight:400;font-size:9.5px;color:var(--mute);letter-spacing:.13em;margin-top:1px}
+header .title{font-family:"Space Grotesk";font-weight:500;font-size:13px;color:var(--ink);margin-left:6px;letter-spacing:.02em}
+header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color:var(--aqua);letter-spacing:.04em}
+@media(max-width:760px){header .title{display:none}}
+#map{flex:1;background:#071420;position:relative}
+.leaflet-container{background:#071420;font-family:"IBM Plex Sans";outline:none}
+/* Crosshair only while click-to-query is armed (the "armed" class on the
+   Leaflet container) -- a click then queries a point instead of just being
+   the start of a drag. Once a query/fire is showing, click-to-query
+   auto-disarms so the map behaves like a normal pannable map (Leaflet's own
+   grab/grabbing cursors apply) until the user explicitly re-arms it via the
+   crosshair control -- this is what lets you pan around freely after
+   selecting a point instead of every click re-querying by accident. */
+.leaflet-container.armed,.leaflet-container.armed.leaflet-grab,.leaflet-container.armed.leaflet-touch-drag{cursor:crosshair!important}
+.leaflet-container.armed.leaflet-dragging,.leaflet-container.armed.leaflet-dragging.leaflet-grab{cursor:crosshair!important}
+.qa-toggle{width:34px;height:34px;line-height:34px;text-align:center;font-size:17px;text-decoration:none;
+  background:var(--panel)!important;color:var(--mute)!important;display:block;cursor:pointer}
+.qa-toggle.active{color:var(--aqua)!important}
+.qa-toggle:hover{background:var(--deep)!important}
+/* OSM tiles have no free dark variant anymore -- invert+hue-rotate turns the
+   standard keyless tileset into a dark map without depending on a paid/keyed
+   provider (same CSS-filter trick RapidWatch used on Esri Ocean tiles). */
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.92) saturate(0.7)}
+.leaflet-control-zoom a{background:var(--panel)!important;color:var(--aqua)!important;border-color:var(--line)!important}
+.leaflet-control-zoom a:hover{background:var(--deep)!important}
+.rw-north{background:rgba(13,28,41,.85);border:1px solid var(--line);border-radius:8px;
+  padding:4px 9px 5px;text-align:center;line-height:1;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.rw-north .rw-arrow{font-size:13px;color:var(--amber);line-height:1}
+.rw-north .rw-n{font-family:"IBM Plex Mono";font-size:11px;font-weight:600;color:var(--ink);margin-top:1px}
+.leaflet-control-scale{margin-left:10px!important}
+/* Border bumped from var(--line) (rgba(120,160,180,.16), only 16% alpha --
+   effectively invisible over map tiles) to a solid, high-contrast color.
+   The border IS the actual measurement indicator here (the tick marks
+   showing the real 50km/50mi distance), not a subtle divider, so it needs
+   real contrast against ANY basemap color, not just the dark panel bg.
+   the user: "for the measurement 50 km and 50 mi - make the line viewable?" */
+.leaflet-control-scale-line{background:rgba(13,28,41,.82)!important;border:2px solid var(--aqua)!important;
+  border-top:none!important;color:var(--ink)!important;font-family:"IBM Plex Mono";font-size:9px;
+  letter-spacing:.04em;padding:1px 6px 2px;text-shadow:none!important}
+.leaflet-bar{border-color:var(--line)!important;box-shadow:0 2px 16px rgba(0,0,0,.5)!important}
+/* Real base-layer switcher (OpenStreetMap / USGS Topo / Hillshade), styled
+   to match the dark theme -- Leaflet's default is a plain white box. */
+.leaflet-control-layers{background:var(--panel)!important;border:1px solid var(--line-2)!important;
+  border-radius:8px!important;box-shadow:0 2px 16px rgba(0,0,0,.5)!important;color:var(--ink)!important;
+  font-family:"IBM Plex Sans",sans-serif}
+.leaflet-control-layers-toggle{background-color:var(--panel)!important}
+.leaflet-control-layers label{color:var(--ink)!important;font-size:12px;margin-bottom:2px}
+.leaflet-control-layers-separator{border-color:var(--line)!important}
+.leaflet-control-attribution{background:rgba(5,11,18,.7)!important;color:var(--mute)!important;font-size:10px!important}
+.leaflet-control-attribution a{color:var(--aqua)!important}
+.leaflet-popup-content-wrapper{background:var(--panel);color:var(--ink);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.6)}
+.leaflet-popup-tip{background:var(--panel);border:1px solid var(--line-2)}
+.leaflet-popup-content{margin:13px 15px;font-size:13px;line-height:1.5}
+.pop .pk{font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
+.pop.aq .pk{color:var(--aqua)}
+.pop h4{font-family:"Space Grotesk";font-weight:600;font-size:15px;margin:5px 0 4px;color:var(--ink)}
+.pop .pc{font-family:"IBM Plex Mono";font-size:10.5px;color:var(--aqua);margin-bottom:7px}
+.pop .row{display:flex;justify-content:space-between;gap:14px;font-size:12px;color:var(--ink);padding:1.5px 0}
+.pop .row b{color:var(--ink);font-weight:500}
+.pop .stale{margin-top:7px;font-family:"IBM Plex Mono";font-size:9.5px;color:var(--coral);letter-spacing:.06em}
+
+.panel{
+  position:absolute;z-index:1000;background:linear-gradient(180deg,rgba(13,28,41,.94),rgba(6,14,22,.9));
+  border:1px solid var(--line);border-radius:12px;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 40px rgba(0,0,0,.5);
+}
+#sidebar{position:absolute;top:28px;left:14px;bottom:20px;width:272px;display:flex;flex-direction:column;gap:10px;z-index:1000;pointer-events:none}
+#sidebar>*{pointer-events:auto}
+/* .panel's base position:absolute only ever stacked correctly inside this
+   flex column by accident (2 panels' abspos "static position" happened to
+   land right) -- adding a 3rd panel broke it (sondePanel overlapping legend).
+   Sidebar panels need normal flex flow; #err lives OUTSIDE #sidebar and
+   keeps the true absolute corner positioning from .panel. */
+#sidebar>.panel{position:relative}
+#fireCard{padding:14px 16px}
+#fireCard .ak{font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber)}
+#fireCard h3{font-family:"Space Grotesk";font-weight:600;font-size:16px;margin:5px 0 8px;color:var(--ink)}
+#fireCard .row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink);padding:2px 0}
+#fireCard .row b{color:var(--ink);font-family:"IBM Plex Mono";font-weight:500}
+#legend{padding:13px 16px;flex:1 1 auto;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+#legend h3{font-family:"Space Grotesk";font-weight:600;font-size:12px;letter-spacing:.04em;margin:0 0 10px;color:var(--ink);display:flex;align-items:center;gap:8px}
+#legend h3 .sq{width:8px;height:8px;border-radius:2px;background:var(--amber)}
+.layer{display:flex;align-items:center;gap:9px;padding:3px 0;cursor:pointer;user-select:none}
+.layer input{appearance:none;width:15px;height:15px;border:1.5px solid var(--line-2);border-radius:4px;cursor:pointer;position:relative;flex:none;transition:all .15s;background:transparent}
+.layer input:checked{background:var(--aqua);border-color:var(--aqua)}
+.layer input:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid var(--abyss);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.layer .lbl{font-size:11px;font-weight:500;line-height:1.3;color:var(--ink);flex:1}
+.layer .lbl b{color:var(--ink);font-family:"IBM Plex Mono";font-weight:600}
+.layer:hover .lbl{color:var(--ink)}
+.layer .mk{width:10px;height:10px;border-radius:50%;flex:none;margin-right:1px}
+/* font-weight bumped 400->500 above and in .sat-empty below -- the user: "make
+   the font more crisp... too bright and blurry". A regular-weight (400)
+   thin monospace face at 11px on a dark background genuinely reads as
+   soft/blurry (bright thin strokes "bloom" against dark), independent of
+   the text color's actual contrast ratio, which was already correct
+   (--ink, high contrast). Also gave layerGroupLabel more room below its
+   underline before the following text starts -- the user: "separate beside the
+   line from all the text" -- margin-bottom 8px -> 14px. */
+/* Section headers redone to match the clean/quiet style the user pointed at
+   directly from StormWatch's own "SEVERITY" label (real screenshot,
+   2026-09-06): moderate weight, dimmed via opacity rather than a separate
+   low-contrast color (avoids reintroducing the earlier --mute legibility
+   bug), tighter tracking, and no hard divider line -- whitespace alone
+   separates sections, same as the reference. The previous version (bold
+   600, full-bright ink, wide .12em tracking, a 1px border) read as
+   "shouting" instead of a quiet section label. */
+.layerGroupLabel{font-family:"IBM Plex Mono";font-size:10px;font-weight:500;letter-spacing:.07em;color:var(--ink);opacity:.62;text-transform:uppercase;margin:18px 0 7px;padding-bottom:0;border-bottom:none}
+.layerGroupLabel:first-child{margin-top:0}
+.sat-anim-row{display:flex;align-items:center;gap:8px;padding:6px 0 2px 19px}
+.sat-anim-row .clr{width:auto;margin:0;padding:4px 11px;flex:none}
+#goesAnimTime{font-size:10.5px;color:var(--ink);min-width:0}
+.sat-speed-row{display:flex;gap:4px;padding:5px 0 4px 19px}
+.sat-speed-row button{width:auto;flex:none;margin:0;padding:3px 9px;cursor:pointer;border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);color:var(--ink);border-radius:6px;font-family:"IBM Plex Mono";font-size:9.5px}
+.sat-speed-row button.on{border-color:var(--aqua);color:var(--aqua)}
+.sat-empty{font-family:"IBM Plex Mono";font-size:11px;font-weight:500;line-height:1.5;color:var(--ink);padding:3px 0 5px}
+#skewtModal{position:absolute;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;
+  background:rgba(3,7,12,.78);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+#skewtBox{background:linear-gradient(180deg,rgba(13,28,41,.98),rgba(6,14,22,.97));border:1px solid var(--line-2);
+  border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.7);padding:16px 20px 20px;max-height:92vh;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+#skewtHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+#skewtTitle{font-family:"Space Grotesk";font-weight:600;font-size:14px;letter-spacing:.05em;color:var(--ink)}
+#skewtClose{cursor:pointer;color:var(--ink);font-family:"IBM Plex Mono";font-size:15px;padding:0 4px}
+#skewtClose:hover{color:var(--coral)}
+#skewtCanvas{background:#0a1520;border:1px solid var(--line);border-radius:6px;display:block}
+#skewtDiag{width:620px;max-width:100%;margin-top:12px;font-family:"IBM Plex Mono";font-size:11.5px;color:var(--ink);line-height:1.6}
+#skewtDiag h5{font-family:"Space Grotesk";font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);margin:12px 0 5px}
+#skewtDiag .sk-row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--line)}
+#skewtDiag .sk-note{color:var(--ink);opacity:.85;font-size:10.5px;margin-top:2px}
+#skewtDiag .sk-gap{color:var(--mute);font-size:10px;margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)}
+/* Whole SENSOR SYSTEMS panel: collapsible + draggable-by-header, per the user's
+   ask ("make the whole Sensor System collapsable and movable"). Dragging
+   promotes it out of the sidebar's flex flow (position:fixed, set in JS at
+   drag-start) so it can go anywhere on screen without leaving a gap behind. */
+#legend h3{cursor:move;user-select:none}
+#legend.collapsed .panel-body{display:none}
+/* #legend's base flex:1 1 auto (it normally fills remaining sidebar height)
+   otherwise keeps painting its full background down the sidebar even with
+   the body hidden -- reads as "goes dark" instead of actually collapsing. */
+#legend.collapsed{flex:0 0 auto}
+.panel-collapse-btn{margin-left:auto;cursor:pointer;color:var(--mute);font-family:"IBM Plex Mono";
+  font-size:14px;line-height:1;user-select:none;padding:0 2px}
+.panel-collapse-btn:hover{color:var(--ink)}
+.src-badge{display:inline-block;font-family:"IBM Plex Mono";font-size:8.5px;font-weight:600;letter-spacing:.08em;
+  padding:2.5px 7px;border-radius:5px;margin-bottom:7px}
+.src-badge.src-conus{background:rgba(70,207,214,.14);color:var(--aqua);border:1px solid rgba(70,207,214,.35)}
+.src-badge.src-igra{background:rgba(255,138,61,.14);color:var(--amber);border:1px solid rgba(255,138,61,.35)}
+.src-badge.src-none{background:rgba(255,93,108,.12);color:var(--coral);border:1px solid rgba(255,93,108,.3)}
+#statCount{font-family:"IBM Plex Mono";font-size:10.5px;color:var(--ink);letter-spacing:.04em;padding-top:9px;border-top:1px solid var(--line);margin-top:2px;line-height:1.5}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2000;
+  background:var(--abyss);font-family:"IBM Plex Mono";color:var(--ink);font-size:12px;letter-spacing:.08em}
+#err{position:absolute;top:14px;right:14px;z-index:2100;padding:12px 16px;max-width:320px;color:var(--coral);font-size:12px}
+#err .x{position:absolute;top:8px;right:10px;cursor:pointer;color:var(--mute);font-family:"IBM Plex Mono"}
+#err .x:hover{color:var(--ink)}
+#pointCard{padding:14px 16px}
+#pointCard .ak{font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--aqua)}
+#pointCard h3{font-family:"Space Grotesk";font-weight:600;font-size:15px;margin:5px 0 8px;color:var(--ink)}
+#pointCard .row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink);padding:2px 0}
+#pointCard .row b{color:var(--ink);font-family:"IBM Plex Mono";font-weight:500}
+.clr{margin-top:8px;width:100%;cursor:pointer;border:1px solid var(--line-2);background:rgba(255,255,255,.04);
+  color:var(--ink);border-radius:6px;font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.06em;padding:5px 0}
+.clr:hover{border-color:var(--aqua);color:var(--aqua)}
+#ptLoading{position:absolute;z-index:1500;background:rgba(13,28,41,.92);border:1px solid var(--line-2);border-radius:20px;
+  padding:5px 12px;font-family:"IBM Plex Mono";font-size:10px;color:var(--aqua);letter-spacing:.06em;
+  pointer-events:none;transform:translate(-50%,-140%);white-space:nowrap}
+#fireSearch{display:flex;align-items:center;gap:0;margin-left:6px}
+#fireSearchInput{background:rgba(255,255,255,.04);border:1px solid var(--line-2);border-right:none;border-radius:7px 0 0 7px;
+  color:var(--ink);font-family:"IBM Plex Sans";font-size:12px;padding:6px 10px;width:230px;outline:none}
+#fireSearchInput::placeholder{color:var(--mute)}
+#fireSearchInput:focus{border-color:var(--aqua)}
+#fireSearchBtn{background:rgba(70,207,214,.12);border:1px solid var(--line-2);border-left:none;border-radius:0 7px 7px 0;
+  color:var(--aqua);font-family:"IBM Plex Mono";font-size:10.5px;font-weight:600;letter-spacing:.06em;padding:6px 12px;cursor:pointer}
+#fireSearchBtn:hover{background:rgba(70,207,214,.22)}
+#searchErr{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2100;font-size:11px;color:var(--coral);
+  font-family:"IBM Plex Mono";background:rgba(13,28,41,.92);border:1px solid var(--line-2);border-radius:6px;padding:4px 10px;display:none}
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;z-index:500;pointer-events:none;padding:0 40px}
+#empty .ek{font-family:"Space Grotesk";font-weight:700;font-size:28px;letter-spacing:.06em;color:var(--line-2);margin-bottom:10px}
+#empty p{font-family:"IBM Plex Mono";font-size:12px;color:var(--ink);max-width:420px;line-height:1.6}
+.layer .mk{width:10px;height:10px;border-radius:3px;flex:none;display:inline-block}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand"><span class="dot"></span><div>FIREVIEW<small>LIVE SENSOR FEEDS</small></div></div>
+    <div id="fireSearch"><input id="fireSearchInput" type="text" placeholder="Search any active fire by name…" class="mono"><button id="fireSearchBtn">GO</button></div>
+    <span class="title" id="hdrTitle"></span>
+    <span class="coords mono" id="readout">—</span>
+  </header>
+  <div id="map">
+    <div id="searchErr"></div>
+    <div id="sidebar">
+      <div class="panel" id="fireCard" style="display:none">
+        <div class="ak">ACTIVE INCIDENT</div>
+        <h3 id="fireName">—</h3>
+        <div class="row"><span>Size</span><b id="fAcres">—</b></div>
+        <div class="row"><span>Contained</span><b id="fContained">—</b></div>
+        <div class="row"><span>Personnel</span><b id="fPersonnel">—</b></div>
+        <div class="row"><span>Region</span><b id="fRegion">—</b></div>
+        <div class="row"><span>Search Radius</span><b id="fRadius">—</b></div>
+      </div>
+      <div class="panel" id="pointCard" style="display:none">
+        <div class="ak">QUERIED POINT</div>
+        <h3 id="pointCoords">—</h3>
+        <div class="row"><span>Region</span><b id="pRegion">—</b></div>
+        <div class="row"><span>Search Radius</span><b id="pRadius">—</b></div>
+        <button id="ptClearBtn" class="clr">CLEAR</button>
+      </div>
+      <div class="panel" id="legend" style="display:none">
+        <h3><span class="sq"></span><span class="panel-title-text">SENSOR SYSTEMS</span></h3>
+        <div class="panel-body">
+        <div class="layerGroupLabel">Ground Sensors</div>
+        <div id="netLayers"></div>
+        <div class="layerGroupLabel">Radiosonde Soundings</div>
+        <div id="sondeList"></div>
+        <div class="layerGroupLabel">Active Fire Detections</div>
+        <div id="fireDetLayers"></div>
+        <div class="layerGroupLabel">NEXRAD Radar</div>
+        <div id="nexradLayers"></div>
+        <div id="satLabel" class="layerGroupLabel"></div>
+        <div id="satLayers"></div>
+        <div id="statCount">loading stations…</div>
+        </div>
+      </div>
+    </div>
+    <div id="err" class="panel" style="display:none"></div>
+    <div id="empty">
+      <div class="ek">FIREVIEW</div>
+      <p>Search any active US fire by name above, or click anywhere on the map to pull the live sensor network around that point.</p>
+    </div>
+    <div id="loading" style="display:none">FETCHING LIVE SENSOR DATA…</div>
+    <div id="skewtModal" style="display:none">
+      <div id="skewtBox">
+        <div id="skewtHead"><span id="skewtTitle">SKEW-T LOG-P</span><span id="skewtClose">✕</span></div>
+        <canvas id="skewtCanvas" width="620" height="620"></canvas>
+        <div id="skewtDiag"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const API_BASE = 'http://127.0.0.1:8940';
+
+// Each sensor TYPE gets its own fixed color (not a severity/wind-speed
+// gradient) -- the user's explicit call: type identity matters more at a glance
+// than instantaneous wind band, and severity is still readable per-marker
+// via its popup. Marker SIZE still scales with wind magnitude (a real,
+// separate signal), just not color.
+const FAMILY_COLORS = { ASOS: '--aqua', RWIS: '--amber', DCP: '--violet', SNTL: '--lime', SNTLT: '--lime', MDTCAM: '--gold', VIIRS: '--coral', MODIS: '--amber-soft', NEXRAD: '--sky' };
+const FAMILY_LABELS = { ASOS: 'Airport (ASOS)', RWIS: 'Road Weather (RWIS)', DCP: 'Remote Sensor (DCP)',
+  SNTL: 'SNOTEL — Ridge Wind', SNTLT: 'SNOTEL Lite — Ridge Wind', MDTCAM: 'State DOT Road Cameras',
+  VIIRS: 'VIIRS Active Fire (375m)', MODIS: 'MODIS Active Fire (1km)', NEXRAD: 'NEXRAD Stations' };
+function familyColor(fam){ return getVar(FAMILY_COLORS[fam] || '--slate'); }
+function familyLabel(fam){ return FAMILY_LABELS[fam] || fam; }
+// Network codes are state-prefixed (MT_ASOS, AK_ASOS, ID_RWIS, ...) because
+// that's how IEM Mesonet keys them -- but this is a national system, one
+// fire/point query can span multiple states, and nobody needs to see the
+// state code twice. Group by sensor TYPE nationally instead.
+function networkFamily(net){
+  const parts = net.split('_');
+  return parts.length > 1 ? parts[parts.length-1] : net;
+}
+
+function getVar(name){return getComputedStyle(document.documentElement).getPropertyValue(name).trim()}
+function fmt(v,unit,dec){if(v==null||v==='')return '—';return (dec!=null?Number(v).toFixed(dec):v)+(unit||'')}
+function ageMinutes(iso){if(!iso)return null;return (Date.now()-new Date(iso).getTime())/60000}
+function isStale(iso){const m=ageMinutes(iso);return m==null||m>150}
+function showErr(html){
+  const err=document.getElementById('err');
+  err.style.display='block';
+  err.innerHTML='<span class="x" onclick="this.parentElement.style.display=\'none\'">✕</span>'+html;
+}
+
+// ---- Map + base layers init immediately on load -- ONE dashboard, no fire
+// required up front. A fire search or a map click both populate it live. ----
+const map = L.map('map',{zoomControl:false,attributionControl:true}).setView([39.5,-98.35], 4);
+L.control.zoom({position:'topright'}).addTo(map);
+const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'© OpenStreetMap contributors · station data: IEM Mesonet · soundings: NWS FM-35/IGRA · fire: NIFC WFIGS · satellite: NASA GIBS/GOES-R',
+  maxZoom:18, subdomains:'abc'
+}).addTo(map);
+// Real topographic/hillshade base layers -- the user: "I want to be able to
+// view the base with really good topographic relief, a high resolution
+// hillshade." Verified live before wiring in: USGS National Map's own
+// cached basemap tiles (USGSTopo, USGSShadedReliefOnly) are real and good
+// quality but cap out around z10-11 in rural/wilderness areas (confirmed:
+// 404s past that in rural Montana) -- not "high resolution" everywhere.
+// Esri's World_Hillshade held real detail to z14+ at the same rural test
+// point and is genuinely high-quality (confirmed by fetching and looking at
+// an actual tile -- real mountain ridge relief, not a placeholder).
+// Real bug, same class as the earlier GOES color-inversion fix: the
+// dark-mode CSS filter (`invert(1) hue-rotate(180deg) ...`) applies to
+// .leaflet-tile-pane globally, which is fine for inverting OSM's light
+// basemap but genuinely wrong for a hillshade/relief layer -- that filter
+// flips light/dark relief cues, making sun-facing slopes look shadowed and
+// vice versa. the user: "The USGS Top relieft is horrible... the hillshard
+// relief is horrible" -- a dedicated pane (same fix pattern as `goesPane`)
+// escapes that filter so these render with their real, correct shading.
+map.createPane('realTerrainPane');
+map.getPane('realTerrainPane').style.zIndex = 200; // same level as the default base tile pane -- these are mutually-exclusive base layers, never shown together
+const usgsTopoBase = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'USGS National Map', maxNativeZoom:16, maxZoom:18, pane:'realTerrainPane'
+});
+const hillshadeBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'Esri World Hillshade (elevation-derived)', maxNativeZoom:16, maxZoom:18, pane:'realTerrainPane'
+});
+// "Add the base layer box below the zoom in and zoom out buttons on top
+// right" -- Leaflet stacks same-position controls in add order, so adding
+// this right after zoom puts it directly beneath it.
+L.control.layers({
+  'OpenStreetMap': osmBase,
+  'USGS Topo (relief + contours)': usgsTopoBase,
+  'Hillshade (elevation relief)': hillshadeBase
+}, null, {position:'topright', collapsed:false}).addTo(map);
+const NorthArrow = L.Control.extend({options:{position:'topleft'},
+  onAdd(){const d=L.DomUtil.create('div','rw-north');
+    d.innerHTML='<div class="rw-arrow">▲</div><div class="rw-n">N</div>';
+    d.title='North (map is north-up)';return d;}});
+new NorthArrow().addTo(map);
+L.control.scale({position:'bottomright',metric:true,imperial:true,maxWidth:140}).addTo(map);
+
+// ---- Query-armed toggle -- click-to-query is ON by default (crosshair
+// cursor), same as before, but now auto-disarms after a fire/point loads so
+// the map goes back to a normal pannable grab cursor. Re-arm with this
+// control (stacks under the zoom control automatically, no manual pixel
+// math) when ready to pick a new point -- this is what fixes "I need to pan
+// around after I've already selected a point" without every subsequent
+// click firing a new query by accident. ----
+let queryArmed = true;
+function setQueryArmed(v){
+  queryArmed = v;
+  map.getContainer().classList.toggle('armed', v);
+  const btn = document.getElementById('queryArmBtn');
+  if(!btn) return;
+  btn.classList.toggle('active', v);
+  btn.title = v ? 'Click-to-query: ON — click the map to select a point'
+                : 'Click-to-query: OFF — pan freely. Click here to select a new point';
+}
+const QueryArmToggle = L.Control.extend({options:{position:'topright'},
+  onAdd(){
+    const d = L.DomUtil.create('div','leaflet-bar');
+    const btn = L.DomUtil.create('a','qa-toggle active', d);
+    btn.id = 'queryArmBtn'; btn.href = '#'; btn.innerHTML = '⌖';
+    L.DomEvent.disableClickPropagation(d);
+    L.DomEvent.on(btn, 'click', e=>{ L.DomEvent.preventDefault(e); setQueryArmed(!queryArmed); });
+    return d;
+  }});
+new QueryArmToggle().addTo(map);
+setQueryArmed(true);
+
+// ---- SENSOR SYSTEMS panel: collapsible + draggable, per the user's ask.
+// Collapse just hides everything under the h3 (a `.panel-body` wrapper
+// added around the whole group list). Dragging is by the header only (the
+// title bar), same convention as any desktop window -- clicking a checkbox
+// or a sonde row inside the body must never start a drag. First drag
+// promotes the panel out of #sidebar's flex flow to position:fixed at its
+// exact current screen position (no jump), after which left/top track the
+// pointer directly; the panel keeps that position across every later
+// render since #legend itself is never recreated, only its inner lists are. ----
+(function setupLegendPanel(){
+  const legend = document.getElementById('legend');
+  const h3 = legend.querySelector('h3');
+  const collapseBtn = document.createElement('span');
+  collapseBtn.className = 'panel-collapse-btn'; collapseBtn.textContent = '−'; collapseBtn.title = 'Collapse';
+  collapseBtn.addEventListener('pointerdown', e=>e.stopPropagation());
+  collapseBtn.addEventListener('click', e=>{
+    e.stopPropagation();
+    legend.classList.toggle('collapsed');
+    const collapsed = legend.classList.contains('collapsed');
+    collapseBtn.textContent = collapsed ? '+' : '−';
+    collapseBtn.title = collapsed ? 'Expand' : 'Collapse';
+  });
+  h3.appendChild(collapseBtn);
+
+  let dragging = false, startX, startY, startLeft, startTop;
+  h3.addEventListener('pointerdown', e=>{
+    if(e.target === collapseBtn) return;
+    const rect = legend.getBoundingClientRect();
+    legend.style.position = 'fixed';
+    legend.style.left = rect.left+'px'; legend.style.top = rect.top+'px';
+    legend.style.right = 'auto'; legend.style.bottom = 'auto'; legend.style.margin = '0';
+    legend.style.width = rect.width+'px'; legend.style.maxHeight = '75vh';
+    startX = e.clientX; startY = e.clientY; startLeft = rect.left; startTop = rect.top;
+    dragging = true;
+    h3.setPointerCapture(e.pointerId);
+  });
+  h3.addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    legend.style.left = (startLeft + (e.clientX - startX))+'px';
+    legend.style.top = (startTop + (e.clientY - startY))+'px';
+  });
+  h3.addEventListener('pointerup', ()=>{ dragging = false; });
+})();
+
+// Real satellite tiles need their own pane -- the dark-mode CSS filter
+// (invert+hue-rotate, see .leaflet-tile-pane above) is meant only to turn
+// OSM's light basemap dark. Leaflet puts ALL tile layers in the same shared
+// .leaflet-tile-pane by default, so GOES imagery was silently getting the
+// same invert+hue-rotate treatment as the basemap -- real true-color imagery
+// run through that looks inverted/wrong, not stylized. A custom pane has its
+// own class (not "leaflet-tile-pane"), so it's outside that CSS rule.
+map.createPane('goesPane');
+map.getPane('goesPane').style.zIndex = 350; // above tiles(200), below overlays(400)
+
+// The sidebar/overlay panels now live INSIDE #map (needed so their absolute
+// positioning excludes the header regardless of its height) -- but Leaflet's
+// own click handler doesn't know about them, so without this a click on e.g.
+// the CLEAR button also bubbles through as a real map click underneath it
+// (verified: clicking CLEAR fired a stray point query in the Aleutians, at
+// whatever lat/lon happened to be under that screen pixel). Tell Leaflet to
+// stop click/scroll events on these from ever reaching the map itself.
+['sidebar','err','pointCard','empty','searchErr','loading'].forEach(id=>{
+  const el = document.getElementById(id);
+  if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); }
+});
+
+// ---- Reusable marker/popup builders -- shared by the fire render, the
+// click-anywhere point-query layer, and (fire) both use the same visuals. ----
+function stationPopupHtml(s, distLabel){
+  const stale = isStale(s.valid_utc);
+  const dirTxt = s.dir_deg!=null ? Math.round(s.dir_deg)+'°' : '—';
+  return '<div class="pop"><div class="pk">'+s.network+'</div><h4>'+(s.name||s.id)+'</h4>'+
+    '<div class="pc">'+s.dist_mi+' mi from '+distLabel+' · '+fmt(s.elevation_ft,' ft',0)+' elev</div>'+
+    '<div class="row"><span>Sustained</span><b>'+fmt(s.wind_mph,' mph',1)+'</b></div>'+
+    '<div class="row"><span>Gust</span><b>'+fmt(s.gust_mph,' mph',1)+'</b></div>'+
+    '<div class="row"><span>Direction</span><b>'+dirTxt+'</b></div>'+
+    '<div class="row"><span>Temp</span><b>'+fmt(s.temp_f,'°F',0)+'</b></div>'+
+    '<div class="row"><span>RH</span><b>'+fmt(s.relh_pct,'%',0)+'</b></div>'+
+    '<div class="row"><span>Visibility</span><b>'+fmt(s.vis_mi,' mi',1)+'</b></div>'+
+    (stale?'<div class="stale">⚠ STALE — last report '+s.valid_utc+'</div>':
+      '<div class="row" style="margin-top:5px"><span>Valid</span><b>'+(s.valid_utc||'—')+'</b></div>')+
+    '</div>';
+}
+function makeStationMarker(s, distLabel){
+  const stale = isStale(s.valid_utc);
+  const gustOrWind = s.gust_mph!=null ? s.gust_mph : s.wind_mph;
+  const r = 5 + Math.min(6, (gustOrWind||0)/8);
+  return L.circleMarker([s.lat, s.lon], {
+    radius:r, color: stale ? getVar('--mute') : '#1a2a38',
+    weight:stale?1:1.5, fillColor:familyColor(networkFamily(s.network)), fillOpacity: stale?0.35:0.9
+  }).bindPopup(stationPopupHtml(s, distLabel));
+}
+function snotelPopupHtml(s, distLabel){
+  const dirTxt = s.dir_deg!=null ? Math.round(s.dir_deg)+'°' : '—';
+  return '<div class="pop"><div class="pk">'+s.network+' — RIDGE WIND PROXY</div><h4>'+(s.name||s.id)+'</h4>'+
+    '<div class="pc">'+s.dist_mi+' mi from '+distLabel+' · '+fmt(s.elevation_ft,' ft',0)+' elev</div>'+
+    '<div class="row"><span>Sustained</span><b>'+fmt(s.wind_mph,' mph',1)+'</b></div>'+
+    '<div class="row"><span>Gust</span><b>'+fmt(s.gust_mph,' mph',1)+'</b></div>'+
+    '<div class="row"><span>Direction</span><b>'+dirTxt+'</b></div>'+
+    '<div class="row" style="margin-top:5px"><span>Valid (station-local)</span><b>'+(s.valid_local||'—')+'</b></div>'+
+    '</div>';
+}
+function makeSnotelMarker(s, distLabel){
+  const icon = L.divIcon({className:'', html:
+    '<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;'+
+    'border-bottom:12px solid '+familyColor(networkFamily(s.network))+'"></div>',
+    iconSize:[14,12], iconAnchor:[7,10]});
+  return L.marker([s.lat, s.lon], {icon}).bindPopup(snotelPopupHtml(s, distLabel));
+}
+function cameraPopupHtml(c, distLabel){
+  const dirTxt = c.wind_dir_compass || '—';
+  const imgs = (c.cameras||[]).map(cam=>
+    '<div style="margin-top:8px"><div style="font-family:\'IBM Plex Mono\';font-size:9.5px;color:var(--gold);letter-spacing:.04em;margin-bottom:3px">'+
+    (cam.description||cam.name||'')+'</div><img src="'+cam.image_url+'" style="width:100%;border-radius:6px;display:block;border:1px solid var(--line-2)"></div>'
+  ).join('');
+  const STATE_DOT_SOURCE = { MT: 'Montana DOT RWIS (511mt.net)', SD: 'South Dakota DOT RWIS (511sd.gov)' };
+  return '<div class="pop" style="width:240px"><div class="pk">'+(c.state||'')+' RWIS — '+(c.route||'')+
+    (c.mrm!=null?' MP '+c.mrm:'')+'</div><h4>'+c.name+'</h4>'+
+    '<div class="pc">'+c.dist_mi+' mi from '+distLabel+' · '+fmt(c.elevation_ft,' ft',0)+' elev</div>'+
+    '<div class="row"><span>Wind</span><b>'+fmt(c.wind_mph,' mph',0)+' @ '+dirTxt+'</b></div>'+
+    '<div class="row"><span>Gust</span><b>'+fmt(c.gust_mph,' mph',0)+'</b></div>'+
+    '<div class="row"><span>Air temp</span><b>'+fmt(c.air_temp_f,'°F',0)+'</b></div>'+
+    '<div class="row"><span>Surface temp</span><b>'+fmt(c.surface_temp_f,'°F',0)+'</b></div>'+
+    '<div class="row"><span>Precip</span><b>'+(c.precip_type||'—')+'</b></div>'+
+    imgs+
+    '<div class="row" style="margin-top:6px;color:var(--ink);font-size:9.5px">Source: '+(STATE_DOT_SOURCE[c.state]||(c.state+' DOT RWIS'))+' · refreshes ~15 min</div>'+
+    '</div>';
+}
+function makeCameraMarker(c, distLabel){
+  const icon = L.divIcon({className:'', html:
+    '<div style="width:13px;height:13px;border-radius:3px;background:'+getVar('--gold')+
+    ';border:2px solid #1a1408"></div>',
+    iconSize:[13,13], iconAnchor:[6,6]});
+  return L.marker([c.lat, c.lon], {icon}).bindPopup(cameraPopupHtml(c, distLabel), {maxWidth:260});
+}
+function viirsPopupHtml(v, distLabel){
+  return '<div class="pop"><div class="pk" style="color:var(--coral)">VIIRS ACTIVE FIRE — '+(v.satellite||'')+'</div>'+
+    '<h4>'+v.dist_mi+' mi from '+distLabel+'</h4>'+
+    '<div class="row"><span>Confidence</span><b>'+(v.confidence||'—')+'</b></div>'+
+    '<div class="row"><span>Fire radiative power</span><b>'+fmt(v.frp_mw,' MW',1)+'</b></div>'+
+    '<div class="row"><span>Day/Night</span><b>'+(v.daynight||'—')+'</b></div>'+
+    '<div class="row"><span>Detected</span><b>'+(v.acq_utc||'—')+'</b></div>'+
+    '<div class="row"><span>Age</span><b>'+(v.hours_old!=null?v.hours_old+' hr':'—')+'</b></div>'+
+    '</div>';
+}
+function makeViirsMarker(v, distLabel){
+  const fresh = v.hours_old==null || v.hours_old<=12;
+  return L.circleMarker([v.lat, v.lon], {
+    radius: 4 + Math.min(4, (v.frp_mw||0)/15),
+    color:'#2a0e0e', weight:1, fillColor: getVar('--coral'), fillOpacity: fresh?0.9:0.45
+  }).bindPopup(viirsPopupHtml(v, distLabel));
+}
+function modisPopupHtml(m, distLabel){
+  return '<div class="pop"><div class="pk" style="color:var(--amber-soft)">MODIS ACTIVE FIRE — '+(m.satellite||'')+'</div>'+
+    '<h4>'+m.dist_mi+' mi from '+distLabel+'</h4>'+
+    '<div class="row"><span>Confidence</span><b>'+(m.confidence_pct!=null?m.confidence_pct+'%':'—')+'</b></div>'+
+    '<div class="row"><span>Fire radiative power</span><b>'+fmt(m.frp_mw,' MW',1)+'</b></div>'+
+    '<div class="row"><span>Brightness</span><b>'+fmt(m.brightness_k,' K',0)+'</b></div>'+
+    '<div class="row"><span>Day/Night</span><b>'+(m.daynight||'—')+'</b></div>'+
+    '<div class="row"><span>Detected</span><b>'+(m.acq_utc||'—')+'</b></div>'+
+    '<div class="row"><span>Age</span><b>'+(m.hours_old!=null?m.hours_old+' hr':'—')+'</b></div>'+
+    '<div class="row" style="margin-top:5px;color:var(--ink);font-size:9.5px">1km pixel -- coarser footprint than VIIRS, real position uncertainty at this scale</div>'+
+    '</div>';
+}
+// Square glyph, not the VIIRS circle -- MODIS's 1km pixel is a genuinely
+// coarser/different sensor, not just a lower-confidence VIIRS point.
+function makeModisMarker(m, distLabel){
+  const fresh = m.hours_old==null || m.hours_old<=12;
+  const size = 8 + Math.min(6, (m.frp_mw||0)/20);
+  const icon = L.divIcon({className:'', html:
+    '<div style="width:'+size+'px;height:'+size+'px;background:'+getVar('--amber-soft')+
+    ';border:1.5px solid #3a2408;opacity:'+(fresh?0.9:0.4)+'"></div>',
+    iconSize:[size,size], iconAnchor:[size/2,size/2]});
+  return L.marker([m.lat, m.lon], {icon}).bindPopup(modisPopupHtml(m, distLabel));
+}
+// ---- NEXRAD radar stations -- the user: "add NEXRAD stations within 100 miles
+// of selection... I want reflectivity and wind speed, etc." Real per-station
+// numeric wind/velocity isn't a thing NOAA publishes (base velocity is a
+// single-site radar PRODUCT, not a clean numeric feed) -- verified live
+// against NOAA's own WMS GetCapabilities before wiring in (opengeo.ncep.noaa.gov,
+// layers <id>_sr_bref / <id>_sr_bvel, both real, both CORS-enabled). So
+// reflectivity AND velocity are both represented as a real WMS tile layer
+// (see makeNexradWmsLayer below), not a fabricated wind-speed number.
+function nexradPopupHtml(s, distLabel){
+  // Reflectivity/velocity IMAGES moved OUT of the popup and onto real
+  // toggleable map layers (see renderNexradLayers) per the user's explicit ask:
+  // "I want the NEXRAD station data to be shown on main layers ... not in
+  // popup windows." Popup now just carries station identity.
+  return '<div class="pop" style="width:240px"><div class="pk" style="color:var(--sky)">NEXRAD — '+s.id+'</div><h4>'+(s.name||s.id)+'</h4>'+
+    '<div class="pc">'+s.dist_mi+' mi from '+distLabel+' · '+(s.state||'')+' · '+fmt(s.elevation_ft,' ft',0)+' elev</div>'+
+    '<div class="row" style="margin-top:6px;color:var(--ink);font-size:9.5px">Live reflectivity/velocity imagery: use the NEXRAD Reflectivity / NEXRAD Velocity toggles in the Sensor Systems panel</div>'+
+    '</div>';
+}
+function makeNexradMarker(s, distLabel){
+  const icon = L.divIcon({className:'', html:
+    '<div style="width:12px;height:12px;border-radius:50%;background:'+getVar('--sky')+
+    ';border:2px solid #0a1c2e"></div>',
+    iconSize:[12,12], iconAnchor:[6,6]});
+  return L.marker([s.lat, s.lon], {icon}).bindPopup(nexradPopupHtml(s, distLabel), {maxWidth:280});
+}
+// Real per-station radar imagery as a real Leaflet WMS TILE layer, not a
+// single fixed-resolution image stretched over a huge bbox. the user: "the
+// nexrad imagery is horrible... look at sites like RapidWatch" -- traced
+// this directly to StormWatch's own working implementation
+// (weather-alerts.html) as the real reference he pointed at: it uses
+// `L.tileLayer.wms(...)`, which requests properly-sized tiles for whatever
+// zoom the map is actually at, instead of one 420x420 snapshot covering a
+// ~1100km box (our original approach) that necessarily looks blocky at any
+// real zoom. Same real WMS service/layers (opengeo.ncep.noaa.gov,
+// <id>_sr_bref/_sr_bvel), just requested the correct way.
+function makeNexradWmsLayer(s, product){
+  const sid = s.id.toLowerCase();
+  return L.tileLayer.wms('https://opengeo.ncep.noaa.gov/geoserver/'+sid+'/ows', {
+    layers: sid+'_sr_'+product,
+    version: '1.1.1', format: 'image/png', transparent: true,
+    // tileSize:512 (Leaflet's WMS layer handles the zoom-offset math itself)
+    // requests 4x the pixels per tile -- the real fix for "need sharper
+    // radar imagery", verified live: fetched the identical real area from
+    // this exact WMS at 256px vs 1024px and looked at both directly. The
+    // source genuinely has fine detail (down to individual radar beam rays
+    // near the site) that plain 256px tiles were blurring away -- this
+    // isn't a data-resolution limit, it was a request-resolution one.
+    // opacity bumped from 0.75 -- the user: "the nexrad colors don't look like
+    // noaa." Verified the real cause by sampling an actual pixel from a
+    // real radar image and computing its alpha blend against this app's
+    // dark basemap color: a true NOAA RGB(81,134,183) shifted all the way
+    // to (63,106,145) at 0.75 opacity, a real, visible darken/desaturate.
+    // At 0.95 it lands at (77,128,175) -- close enough to read as the real
+    // color, matching the legend swatch it's supposed to correspond to.
+    tileSize: 512, maxNativeZoom: 12, maxZoom: 18, opacity: 0.95,
+    attribution: 'NOAA single-site radar / '+s.id
+  });
+}
+function renderNexradLayers(nexrad, distLabel, targetLayerGroup){
+  const el = document.getElementById('nexradLayers');
+  el.innerHTML = '';
+  const stations = nexrad || [];
+
+  // Real station markers within 100mi -- always shown, even at a real
+  // zero, matching every other layer's convention in this panel (Active
+  // Fire Detections above, radiosonde track below). No national composite
+  // mosaic option -- removed per the user's explicit "I don't want NEXRAD
+  // composite."
+  netState['NEXRAD'] = true;
+  stations.forEach(s=>{
+    currentStationMarkers.push({marker: makeNexradMarker(s,distLabel).addTo(targetLayerGroup), family:'NEXRAD'});
+  });
+  const stationRow = document.createElement('label'); stationRow.className='layer';
+  if(!stations.length) stationRow.style.opacity = '0.5';
+  stationRow.innerHTML = '<span class="mk" style="background:'+getVar('--sky')+'"></span>'+
+    '<span class="lbl">NEXRAD Stations (100mi) <b>('+stations.length+')</b></span>'+
+    '<input type="checkbox" checked style="margin-left:auto"'+(stations.length?'':' disabled')+'>';
+  stationRow.querySelector('input').addEventListener('change', e=>{ netState['NEXRAD']=e.target.checked; updateVisibility(); });
+  el.appendChild(stationRow);
+
+  // Reflectivity + velocity as real toggleable WMS tile layers (one real
+  // tile layer per nearby station, both products), not popup-only.
+  const nexradProductState = {}; // key -> {label, layers:[], checkbox}
+  [{key:'bref', label:'NEXRAD Reflectivity'}, {key:'bvel', label:'NEXRAD Velocity'}].forEach(({key, label})=>{
+    const row = document.createElement('label'); row.className='layer';
+    if(!stations.length) row.style.opacity = '0.5';
+    row.innerHTML = '<span class="mk" style="background:'+getVar('--sky')+';border-radius:2px"></span>'+
+      '<span class="lbl">'+label+'</span><input type="checkbox" style="margin-left:auto"'+(stations.length?'':' disabled')+'>';
+    const checkbox = row.querySelector('input');
+    const entry = {label, layers:[], checkbox};
+    // Real legend, straight from NOAA's own WMS GetLegendGraphic for this
+    // exact layer/style -- not a color scale I guessed at. the user asked to
+    // "add a color legend" for NEXRAD.
+    const legendImg = document.createElement('img');
+    // hidden alone (no inline display here) -- an inline display:block used
+    // to fight the [hidden] UA rule and win on specificity, so this legend
+    // rendered squished-thin at all times regardless of the checkbox state.
+    // That was the real "line" between the Reflectivity/Velocity rows.
+    legendImg.hidden = true;
+    legendImg.style.cssText = 'width:100%;margin:2px 0 4px;border-radius:3px';
+    if(stations.length){
+      const sid = stations[0].id.toLowerCase();
+      legendImg.src = 'https://opengeo.ncep.noaa.gov/geoserver/'+sid+'/wms?request=GetLegendGraphic&version=1.1.1&format=image%2Fpng&width=300&height=22&layer='+sid+'_sr_'+key;
+    }
+    checkbox.addEventListener('change', e=>{
+      entry.layers.forEach(o=>targetLayerGroup.removeLayer(o));
+      entry.layers = [];
+      legendImg.hidden = !e.target.checked;
+      if(e.target.checked){
+        entry.layers = stations.map(s=>makeNexradWmsLayer(s, key).addTo(targetLayerGroup));
+        return;
+      }
+      // Unchecking the box that's currently driving the animation should
+      // really stop it, same fix as the GOES animation checkbox.
+      if(nexradAnim && nexradAnim.productKey===key) nexradAnimStop();
+    });
+    el.appendChild(row);
+    el.appendChild(legendImg);
+    nexradProductState[key] = entry;
+  });
+
+  if(stations.length){
+    const animRow = document.createElement('div'); animRow.className = 'sat-anim-row';
+    animRow.innerHTML = '<button id="nexradAnimBtn" class="clr">▶ Animate</button><span id="nexradAnimTime" class="mono">static</span>';
+    el.appendChild(animRow);
+    const speedRow = document.createElement('div'); speedRow.className = 'sat-speed-row';
+    GOES_ANIM_SPEEDS.forEach(s=>{
+      const b = document.createElement('button'); b.textContent = s.lab;
+      if(s.ms===600) b.classList.add('on');
+      b.addEventListener('click', ()=>{
+        [...speedRow.children].forEach(c=>c.classList.remove('on'));
+        b.classList.add('on');
+        if(nexradAnim){ nexradAnim.speedMs=s.ms; clearInterval(nexradAnim.timer); nexradAnim.timer=setInterval(nexradAnim.tick, s.ms); }
+      });
+      speedRow.appendChild(b);
+    });
+    el.appendChild(speedRow);
+    document.getElementById('nexradAnimBtn').addEventListener('click', ()=>{
+      nexradAnimToggle(stations, targetLayerGroup, nexradProductState);
+    });
+  }
+
+  if(!stations.length){
+    const note = document.createElement('div'); note.className = 'sat-empty';
+    note.textContent = 'No real WSR-88D site within 100mi of this point';
+    el.appendChild(note);
+  }
+}
+// ---- Real NEXRAD animation -- the user: "I need Nexrad animated." NOAA's own
+// WMS GetCapabilities for these single-site radar layers confirmed a real
+// <Dimension name="time"> with nearestValue="1" (verified live against
+// KTFX: 46 real scan timestamps over the last ~2 hours, ~3min cadence) --
+// meaning any requested time snaps server-side to the nearest REAL scan, so
+// frames don't need per-step existence probing the way GOES/GIBS does.
+// Same real service/layers as the static toggle above, just with a `time`
+// param added per frame and cycled like the existing GOES animation.
+let nexradAnim = null; // {timer, idx, frames, speedMs, productKey, targetLayerGroup}
+function nexradAnimStop(){
+  if(!nexradAnim) return;
+  clearInterval(nexradAnim.timer);
+  nexradAnim.frames.forEach(f=>f.layers.forEach(lyr=>nexradAnim.targetLayerGroup.removeLayer(lyr)));
+  nexradAnim.checkbox.checked = false;
+  const btn = document.getElementById('nexradAnimBtn');
+  const timeLabel = document.getElementById('nexradAnimTime');
+  if(btn) btn.textContent = '▶ Animate';
+  if(timeLabel) timeLabel.textContent = 'static';
+  nexradAnim = null;
+}
+function nexradAnimToggle(stations, targetLayerGroup, productState){
+  if(nexradAnim){ nexradAnimStop(); return; }
+  const btn = document.getElementById('nexradAnimBtn');
+  const timeLabel = document.getElementById('nexradAnimTime');
+  const entry = Object.entries(productState).find(([k,p])=>p.checkbox.checked) || Object.entries(productState)[0];
+  const [productKey, product] = entry;
+  product.layers.forEach(o=>targetLayerGroup.removeLayer(o));
+  product.layers = [];
+  const n = 12, stepMin = 5; // last ~55 min, snapped to each station's real nearest scan
+  const now = Date.now();
+  const frames = [];
+  for(let i=n-1; i>=0; i--){
+    const t = new Date(now - i*stepMin*60000).toISOString();
+    const layers = stations.map(s=>{
+      const lyr = makeNexradWmsLayer(s, productKey);
+      lyr.wmsParams.time = t;
+      lyr.setParams({time: t});
+      lyr.setOpacity(0);
+      lyr.addTo(targetLayerGroup);
+      return lyr;
+    });
+    frames.push({t, layers});
+  }
+  product.checkbox.checked = true;
+  nexradAnim = {frames, targetLayerGroup, speedMs:600, idx:0, timer:null, productKey, checkbox:product.checkbox};
+  nexradAnim.tick = ()=>{
+    frames.forEach((f,i)=>f.layers.forEach(lyr=>lyr.setOpacity(i===nexradAnim.idx?0.95:0)));
+    const d = new Date(frames[nexradAnim.idx].t);
+    timeLabel.textContent = String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+'Z';
+    nexradAnim.idx = (nexradAnim.idx+1)%frames.length;
+  };
+  nexradAnim.timer = setInterval(nexradAnim.tick, nexradAnim.speedMs);
+  nexradAnim.tick();
+  btn.textContent = '⏸ Stop';
+}
+function makeRadiusCircle(lat, lon, radiusMi, color){
+  return L.circle([lat, lon], {
+    radius: radiusMi * 1609.34, // Leaflet circle radius is meters
+    color: color || getVar('--slate'), weight: 1.5, dashArray: '6,6', fill: false, opacity: 0.6
+  }).bindTooltip(radiusMi+' mi search radius', {sticky:true});
+}
+
+// ---- Full radiosonde archive panel -- the user: "I want all the NOAA weather
+// balloon archive available; when I click on an area, I want all the
+// available balloon information." Backend now returns every real nearby
+// site (not just nearest 2) and every real decoded level per site (not
+// just surface+700hPa) -- this renders that in full, click-to-expand per
+// site so a dense-network area doesn't dump one giant wall of tables. ----
+function sondeLevelLabel(label){
+  // Compact form for the narrow sidebar table -- the header's own "Level"
+  // column already implies pressure, so "850 hPa" -> "850" is unambiguous.
+  return label==='Surface' ? 'Sfc' : label.replace(' hPa', '');
+}
+function launchAgoLabel(iso){
+  if(!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if(ms < 0) return '';
+  const hrs = ms/3600000;
+  return hrs < 1 ? Math.round(ms/60000)+' min ago' : hrs.toFixed(1)+' hr ago';
+}
+function launchTimeText(sd){
+  if(sd.launch_utc){
+    const clean = sd.launch_utc.replace('T',' ').replace(':00Z','Z');
+    const ago = launchAgoLabel(sd.launch_utc);
+    return 'Launched '+clean+(ago?' ('+ago+')':'');
+  }
+  return sd.valid_note ? sd.valid_note : 'Launch time unknown';
+}
+// the user: "I want all the data below in the layers panel to be with
+// radiosonde track. Not in the layers display." -- the per-site name/
+// distance/full-level-table dump that used to live here was moved onto the
+// track itself (every point's popup, see trackPointPopupHtml below, now
+// carries the launch site's full identity + the level data). This panel is
+// now just the layer toggle + a real-count summary, matching how every
+// other layer in Sensor Systems works (a checkbox + a count, nothing more).
+function renderSoundingPanel(soundings, distLabel, trackCount){
+  const list = document.getElementById('sondeList');
+  list.innerHTML = '';
+  const real = (soundings||[]).filter(sd=>sd.status==='ok');
+  const failed = (soundings||[]).filter(sd=>sd.status!=='ok');
+  // The balloon network is far sparser than the 75mi sensor radius -- sites
+  // up to ~310mi out are included on purpose (see recorder/balloons.py),
+  // otherwise most queries would show zero real sites at all. Said
+  // explicitly here since a site showing up "beyond 75 miles" otherwise
+  // reads as a bug.
+  const note = document.createElement('div'); note.className = 'sat-empty';
+  note.textContent = 'Radiosonde sites within 300 mi shown (sparser network than the 75mi sensor radius)';
+  list.appendChild(note);
+  // Always shown, even at 0 real tracks -- also controls the 300mi search
+  // boundary circle, so a station "too far away" can be checked visually
+  // against the real search circle instead of just trusting this note.
+  const row = document.createElement('label'); row.className='layer';
+  row.innerHTML = '<span class="mk" style="background:'+getVar('--aqua')+'"></span>'+
+    '<span class="lbl">Track + 300mi radius on map <b>('+trackCount+' pts)</b></span>'+
+    '<input type="checkbox" style="margin-left:auto">';
+  row.querySelector('input').addEventListener('change', e=>{ netState['SONDE_TRACK']=e.target.checked; updateVisibility(); });
+  list.appendChild(row);
+  if(!real.length){
+    const empty = document.createElement('div'); empty.className = 'sat-empty';
+    empty.textContent = failed.length ? failed.length+' site(s) found but none returned live data' : 'No radiosonde sites within range';
+    list.appendChild(empty);
+    return;
+  }
+  const summary = document.createElement('div'); summary.className = 'sat-empty';
+  summary.textContent = real.length+' site'+(real.length===1?'':'s')+' — click a point on the flight track for full level data';
+  list.appendChild(summary);
+  // Launch date/time per site, directly in the panel -- the user: "I need the
+  // god dam dates on the balloon flights" after this got moved onto the
+  // track-point popups and was no longer visible without turning the track
+  // on and clicking a point. One line per site so it stays legible instead
+  // of one long comma-joined string.
+  real.forEach(sd=>{
+    sondeDataBySite[sd.site] = sd; // registry lookup for the popup's "View Skew-T" button
+    const line = document.createElement('div'); line.className = 'sat-empty';
+    line.style.paddingTop = '0'; line.style.paddingBottom = '2px';
+    // KML link deliberately NOT here -- the user: "I am trying to keep the
+    // sensor system tab easy to see and read and not complicated." It
+    // lives entirely in the track-point popups now (every point, not just
+    // the launch marker -- see trackPointPopupHtml).
+    line.textContent = sd.site+' ('+(sd.name||'—')+') — '+launchTimeText(sd);
+    list.appendChild(line);
+  });
+}
+function driftBasisLabel(basis){
+  if(basis==='estimated_real_time_and_height') return 'Estimated flight path — real elapsed time & height, modeled position (not GPS)';
+  if(basis==='estimated_standard_atmosphere_ascent_rate') return 'Estimated flight path — standard-atmosphere height + assumed ascent rate, modeled position (not GPS)';
+  return 'Estimated flight path — not GPS-observed';
+}
+function trackPointObservedTime(sd, pt){
+  if(!sd.launch_utc || pt.t_s==null) return null;
+  const t = new Date(new Date(sd.launch_utc).getTime() + pt.t_s*1000);
+  const clean = t.toISOString().slice(0,16).replace('T',' ')+'Z';
+  if(pt.label==='Surface') return clean+' (launch time)';
+  const isIgra = (sd.source||'').startsWith('IGRA');
+  // IGRA's t_s is the archive's own real elapsed time; CONUS's t_s for any
+  // level past the surface is always derived from the assumed ascent rate
+  // (the TTAA report carries no real per-level elapsed time at all, even
+  // for 850/700hPa where the HEIGHT is real -- time and height are
+  // independent unknowns here, don't conflate one being real with the
+  // other being real too).
+  return clean + (isIgra ? ' (real elapsed time)' : ' (est., assumed ascent rate)');
+}
+// Registry so a popup's plain-HTML button (can't hold a JS closure) can
+// look sounding data back up by site code when clicked.
+const sondeDataBySite = {};
+function trackPointPopupHtml(sd, pt, distLabel){
+  const heightLine = pt.height_basis==='reported' ? fmt(pt.height_m,' m',0)
+    : pt.height_basis==='standard_atmosphere_estimate' ? fmt(pt.height_m,' m',0)+' (std. atm. est.)'
+    : '— (launch site)';
+  const isLaunch = pt.label === 'Surface';
+  // The launch point (first point on every track) carries the full site
+  // identity + timing that used to live in the sidebar list -- moved here
+  // per the user's ask, so it's all reachable from the track itself.
+  const identityBlock = isLaunch ?
+    '<div class="pc">'+sd.dist_mi+' mi from '+distLabel+' · '+((sd.source||'').startsWith('IGRA')?'IGRA · ~1-2 day lag':'CONUS · near-immediate')+'</div>'+
+    '<div class="row"><span>Launch</span><b>'+launchTimeText(sd)+'</b></div>'
+    : '';
+  const timeText = trackPointObservedTime(sd, pt);
+  // The Skew-T button is on EVERY point's popup, not just the launch point
+  // -- real bug from the first build: the user clicked points along the track
+  // (any level, not specifically the surface/launch marker) and never saw
+  // the option at all, since it only existed on one specific point.
+  const hasTempTrace = (sd.levels||[]).some(lv=>lv.temp_c!=null && lv.dewpt_c!=null);
+  const skewtBlock = hasTempTrace
+    ? '<button class="clr" style="margin-top:8px" onclick="openSkewT(\''+sd.site+'\')">View Skew-T + Analysis</button>'
+    : '<div class="sat-empty" style="margin-top:6px">No temp/dewpoint trace available (this site\'s data source doesn\'t carry it) — Skew-T needs both.</div>';
+  // 3D KML download also on EVERY point's popup, same reasoning as the
+  // Skew-T button above -- the user: "I want all the 3D flight information
+  // included in the pop up from the radiosonde tracks", and explicitly does
+  // NOT want it cluttering the Sensor Systems sidebar (moved out of there).
+  const kmlBlock = (sd.drift_track && sd.drift_track.length>=2)
+    ? '<button class="clr" style="margin-top:6px" onclick="downloadFlightKML(\''+sd.site+'\')">Download 3D Flight (KML for Google Earth)</button>'
+    : '';
+  return '<div class="pop aq"><div class="pk">'+sd.site+(isLaunch?' — '+(sd.name||''):' — '+sondeLevelLabel(pt.label))+'</div>'+
+    '<h4>'+(isLaunch?'Launch Point':(pt.pressure_hpa!=null?pt.pressure_hpa+' hPa':'—'))+'</h4>'+
+    identityBlock+
+    (isLaunch ? '' : '<div class="row"><span>Time</span><b>'+(timeText||'—')+'</b></div>')+
+    '<div class="row"><span>Height</span><b>'+heightLine+'</b></div>'+
+    '<div class="row"><span>Temp</span><b>'+fmt(pt.temp_c,'°C',1)+'</b></div>'+
+    '<div class="row"><span>Dewpoint</span><b>'+fmt(pt.dewpt_c,'°C',1)+'</b></div>'+
+    '<div class="row"><span>Wind</span><b>'+(pt.wind_dir!=null?Math.round(pt.wind_dir)+'° / ':'')+fmt(pt.wind_kt,' kt',0)+'</b></div>'+
+    skewtBlock+
+    kmlBlock+
+    '<div class="row" style="margin-top:5px;color:var(--ink);font-size:9.5px">Position modeled from wind profile, not GPS-observed</div></div>';
+}
+
+// ============================================================================
+// Skew-T log-P diagram + real synoptic diagnostics -- the user's ask: "I want the
+// option to see the radiosonde track - or Skew-T... I also want some
+// interpretation or analysis of what the Skew-T plot means". Built from the
+// exact same real per-level data already fetched for the sidebar table (see
+// build_sensor_snapshot.py's _conus_full_profile/_igra_full_profile) -- no
+// new backend call needed. Only offered when temp+dewpoint are both present
+// (IGRA-sourced soundings never have them -- igra.py's parser only extracts
+// pressure/height/wind, a real, already-documented gap -- so Skew-T isn't
+// offered there at all rather than drawing a broken/empty chart).
+//
+// SCOPE, stated explicitly rather than overclaimed: this computes real,
+// directly-derivable diagnostics (inversions, an approximate tropopause,
+// freezing level, per-layer lapse-rate character) from the actual observed
+// mandatory-level data. It does NOT compute CAPE/CIN (a full parcel-theory
+// numerical integration -- a real, separate, larger undertaking that risks
+// a subtle, hard-to-verify bug if rushed) and does NOT compare against HRRR
+// or any other NWP model (would need real model-sounding data this project
+// doesn't fetch yet). Both are named as real open gaps in the panel itself,
+// not silently implied to be included.
+// ============================================================================
+const DRY_ADIABATIC_LAPSE_C_PER_KM = 9.8;
+const SATURATED_LAPSE_C_PER_KM = 6.0; // representative mid-tropospheric moist-adiabatic value, not level-specific
+// Mirrors recorder/drift_track.py's STANDARD_ATM_HEIGHT_M exactly (same
+// real US Standard Atmosphere 1976 reference values) -- needed here too
+// since the sidebar's _conus_full_profile doesn't itself fill this in
+// (only drift_track.py's reckoning does), and lapse-rate direction needs
+// SOME real height ordering even where the exact meters aren't observed.
+const STANDARD_ATM_FALLBACK_M = {1000:111,925:762,850:1457,700:3012,500:5574,400:7185,300:9164,250:10363,200:11784,150:13608,100:16180};
+
+function skewTLevels(sd){
+  // Only levels with a REAL temp+dewpoint (every CONUS mandatory level that
+  // decoded at all has both, per _conus_full_profile -- pressure is always
+  // real too, it's the level identifier itself). Height is real at some
+  // levels (850/700hPa) and a standard-atmosphere estimate elsewhere --
+  // used here only as the loose input to lapse-rate direction, not
+  // presented as itself precise.
+  return (sd.levels||[]).filter(lv=>lv.temp_c!=null && lv.dewpt_c!=null && lv.pressure_hpa!=null)
+    .map(lv=>({...lv, height_m: lv.height_m!=null ? lv.height_m : (STANDARD_ATM_FALLBACK_M[lv.pressure_hpa]||null)}))
+    .sort((a,b)=>b.pressure_hpa-a.pressure_hpa); // surface (highest pressure) first
+}
+
+function computeSkewTDiagnostics(levels){
+  const inversions = [];
+  const lapseLayers = [];
+  let freezingLevel = null;
+  let tropopause = null;
+  for(let i=0; i<levels.length-1; i++){
+    const a = levels[i], b = levels[i+1]; // a = lower (higher pressure), b = upper
+    if(a.height_m==null || b.height_m==null || b.height_m<=a.height_m) continue;
+    const dz_km = (b.height_m - a.height_m)/1000;
+    const dT = b.temp_c - a.temp_c; // negative = cooling with height (normal)
+    const lapse = -dT/dz_km; // positive = normal cooling rate, negative = inversion
+    let character;
+    if(lapse < 0) character = 'inversion';
+    else if(lapse < 2) character = 'isothermal / very stable';
+    else if(lapse < SATURATED_LAPSE_C_PER_KM) character = 'stable';
+    else if(lapse < DRY_ADIABATIC_LAPSE_C_PER_KM) character = 'conditionally unstable';
+    else character = 'unstable (superadiabatic)';
+    lapseLayers.push({from:a.pressure_hpa, to:b.pressure_hpa, lapse:Math.round(lapse*10)/10, character});
+    if(lapse < 0) inversions.push({from:a.pressure_hpa, to:b.pressure_hpa, fromT:a.temp_c, toT:b.temp_c, fromH:a.height_m, toH:b.height_m});
+    if(tropopause===null && lapse <= 2 && b.pressure_hpa <= 500) tropopause = {pressure_hpa:b.pressure_hpa, height_m:b.height_m};
+    if(freezingLevel===null && a.temp_c>=0 && b.temp_c<0){
+      const frac = a.temp_c/(a.temp_c-b.temp_c);
+      freezingLevel = {
+        pressure_hpa: Math.round(a.pressure_hpa - frac*(a.pressure_hpa-b.pressure_hpa)),
+        height_m: Math.round(a.height_m + frac*(b.height_m-a.height_m)),
+      };
+    }
+  }
+  return {inversions, lapseLayers, freezingLevel, tropopause};
+}
+
+function skewTSynopticText(diag, sd){
+  const lines = [];
+  if(diag.inversions.length){
+    diag.inversions.forEach(inv=>{
+      lines.push('A temperature inversion is present between '+inv.to+' hPa and '+inv.from+' hPa (temperature rises from '+
+        inv.fromT.toFixed(1)+'°C to '+inv.toT.toFixed(1)+'°C going up). This layer caps vertical mixing beneath it. '+
+        'It tends to trap smoke, haze, and moisture near the surface, and it suppresses daytime convective growth until it erodes.');
+    });
+  } else {
+    lines.push('No temperature inversion was detected across the reported mandatory levels. The profile cools fairly steadily with height. This favors more efficient vertical mixing than a capped or inverted profile would.');
+  }
+  if(diag.freezingLevel){
+    lines.push('The freezing level (0°C) is at approximately '+diag.freezingLevel.pressure_hpa+' hPa, about '+diag.freezingLevel.height_m.toLocaleString()+' m. This is relevant to precipitation phase. For fire behavior, it roughly brackets where any lofted moisture would begin to glaciate.');
+  }
+  if(diag.tropopause){
+    lines.push('The approximate tropopause is near '+diag.tropopause.pressure_hpa+' hPa, about '+diag.tropopause.height_m.toLocaleString()+' m. This is the first mandatory level where the lapse rate drops to 2°C/km or less, the real WMO threshold definition. It is approximate here since only mandatory levels are available, not a continuous profile.');
+  }
+  const unstableLayers = diag.lapseLayers.filter(l=>l.character==='unstable (superadiabatic)' || l.character==='conditionally unstable');
+  if(unstableLayers.length){
+    lines.push(unstableLayers.length+' layer(s) show a conditionally unstable or steeper-than-moist-adiabatic lapse rate. These support more vigorous vertical development, including updrafts and potential for erratic fire behavior or plume dynamics, if surface heating and moisture are sufficient to release that instability.');
+  }
+  return lines;
+}
+
+function openSkewT(site){
+  const sd = sondeDataBySite[site];
+  if(!sd) return;
+  const levels = skewTLevels(sd);
+  if(levels.length < 2){ return; }
+  const diag = computeSkewTDiagnostics(levels);
+  document.getElementById('skewtTitle').textContent = 'SKEW-T LOG-P — '+sd.site+' ('+(sd.name||'')+')';
+  drawSkewT(document.getElementById('skewtCanvas'), levels);
+  const diagEl = document.getElementById('skewtDiag');
+  const synText = skewTSynopticText(diag, sd);
+  diagEl.innerHTML =
+    '<h5>What this means synoptically</h5>'+
+    synText.map(t=>'<div class="sk-note">• '+t+'</div>').join('')+
+    '<h5>Layer lapse rates (real, from reported levels)</h5>'+
+    diag.lapseLayers.map(l=>'<div class="sk-row"><span>'+l.from+' → '+l.to+' hPa</span><b>'+l.lapse+' °C/km — '+l.character+'</b></div>').join('')+
+    '<div class="sk-gap">Not included: CAPE/CIN (needs full parcel-theory integration, a separate real undertaking) and any comparison against HRRR or another NWP model (would need real model-sounding data this dashboard doesn\'t fetch yet). Tropopause estimate uses only the reported mandatory levels, not a continuous profile, so treat it as approximate.</div>';
+  document.getElementById('skewtModal').style.display = 'flex';
+}
+document.getElementById('skewtClose').addEventListener('click', ()=>{ document.getElementById('skewtModal').style.display = 'none'; });
+L.DomEvent.disableClickPropagation(document.getElementById('skewtModal'));
+
+function drawSkewT(canvas, levels){
+  // Real bug, not a font choice: the canvas had a fixed 620x620 backing
+  // store with no devicePixelRatio handling, so on any Windows display with
+  // scaling above 100% (very common) the browser upscaled that bitmap to
+  // fill the actual physical pixels -- exactly the same blur an <img>
+  // stretched past its native size would show. Fix: size the backing store
+  // to CSS-size * devicePixelRatio, keep the CSS/layout size unchanged via
+  // canvas.style, and scale the context so all the existing logical-pixel
+  // math below (padL, plotW, etc.) still works unmodified.
+  const dpr = window.devicePixelRatio || 1;
+  const W = 620, H = 620; // logical/CSS size -- unchanged from before
+  if(canvas.width !== Math.round(W*dpr) || canvas.height !== Math.round(H*dpr)){
+    canvas.width = Math.round(W*dpr);
+    canvas.height = Math.round(H*dpr);
+    canvas.style.width = W+'px';
+    canvas.style.height = H+'px';
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const padL=58, padR=76, padT=16, padB=56;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const pMin=100, pMax=1050; // hPa range covering the real mandatory-level set
+  const skew = 0.9; // radians-ish shear factor for the classic skewed-T look
+  // Pressure decreases with altitude, so surface/high pressure (pMax) belongs
+  // at the BOTTOM of the chart and the upper atmosphere (pMin) at the TOP --
+  // this was previously inverted (a real bug, not just a labeling gap).
+  const yForP = p => padT + plotH*(1 - (Math.log(pMax)-Math.log(p))/(Math.log(pMax)-Math.log(pMin)));
+  const tMin=-60, tMax=40; // deg C plotted-range at the bottom of the chart
+  const xForTP = (t,p) => {
+    const y = yForP(p);
+    const skewShift = skew*(padT+plotH-y); // shifts right as pressure increases (lower on chart)
+    return padL + plotW*((t-tMin)/(tMax-tMin)) + skewShift*0.55;
+  };
+  // Isobars (real standard levels). Numbers right-aligned against the plot
+  // edge (not left-aligned at the far-left margin) so the rotated
+  // "PRESSURE (hPa)" axis title -- drawn further left, near x=10 -- has
+  // clear space and doesn't sit on top of the numbers (a real overlap bug
+  // the user caught: "the word pressure over the numbers").
+  ctx.strokeStyle = 'rgba(120,160,180,.25)'; ctx.fillStyle = '#93a7b6'; ctx.font = '9px monospace'; ctx.lineWidth=1;
+  ctx.textAlign = 'right';
+  [1000,850,700,500,400,300,250,200,150,100].forEach(p=>{
+    const y = yForP(p); if(y<padT || y>padT+plotH) return;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+plotW,y); ctx.stroke();
+    ctx.fillText(p+'', padL-4, y+3);
+  });
+  ctx.textAlign = 'left';
+  // Isotherms (skewed), every 10C -- ticked with real temperature values
+  // along the bottom edge (the user's ask: "label the x and y axis").
+  ctx.textAlign = 'center';
+  for(let t=tMin; t<=tMax+60; t+=10){
+    ctx.beginPath();
+    ctx.moveTo(xForTP(t,pMax), yForP(pMax));
+    ctx.lineTo(xForTP(t,pMin), yForP(pMin));
+    ctx.stroke();
+    if(t>=tMin && t<=tMax){
+      ctx.fillStyle = '#93a7b6';
+      ctx.fillText(t+'', xForTP(t,pMax), padT+plotH+16);
+    }
+  }
+  ctx.textAlign = 'left';
+  ctx.strokeStyle = 'rgba(120,160,180,.4)';
+  ctx.strokeRect(padL,padT,plotW,plotH);
+  // Axis titles
+  ctx.fillStyle = getVar('--ink'); ctx.font = '600 11px "IBM Plex Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('TEMPERATURE (°C)', padL+plotW/2, padT+plotH+34);
+  ctx.save();
+  ctx.translate(10, padT+plotH/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillText('PRESSURE (hPa)', 0, 0);
+  ctx.restore();
+  ctx.textAlign = 'left';
+  // Real elevation column, right margin -- one label per actual reported
+  // level (not the generic isobar list), using the same height_m each level
+  // already carries for the diagnostics text. the user: "I want to know
+  // elevation." Marked (est.) when it's the standard-atmosphere fallback,
+  // not a real reported height, same distinction used in the popup.
+  ctx.font = '9px monospace'; ctx.fillStyle = '#93a7b6';
+  levels.forEach(lv=>{
+    if(lv.height_m==null) return;
+    const y = yForP(lv.pressure_hpa);
+    if(y<padT || y>padT+plotH) return;
+    const isEst = lv.height_basis === 'standard_atmosphere_estimate';
+    ctx.fillText(Math.round(lv.height_m).toLocaleString()+'m'+(isEst?'~':''), padL+plotW+6, y+3);
+  });
+  ctx.save();
+  ctx.translate(W-10, padT+plotH/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.textAlign = 'center'; ctx.fillStyle = getVar('--ink'); ctx.font = '600 11px "IBM Plex Mono", monospace';
+  ctx.fillText('ELEVATION (~ = std. atm. est.)', 0, 0);
+  ctx.restore();
+  ctx.textAlign = 'left';
+  // Real dewpoint trace
+  ctx.strokeStyle = getVar('--lime'); ctx.lineWidth=2; ctx.beginPath();
+  levels.forEach((lv,i)=>{ const x=xForTP(lv.dewpt_c,lv.pressure_hpa), y=yForP(lv.pressure_hpa); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+  // Real temperature trace
+  ctx.strokeStyle = getVar('--coral'); ctx.lineWidth=2.5; ctx.beginPath();
+  levels.forEach((lv,i)=>{ const x=xForTP(lv.temp_c,lv.pressure_hpa), y=yForP(lv.pressure_hpa); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+  levels.forEach(lv=>{
+    ctx.fillStyle = getVar('--coral');
+    let x=xForTP(lv.temp_c,lv.pressure_hpa), y=yForP(lv.pressure_hpa);
+    ctx.beginPath(); ctx.arc(x,y,2.5,0,7); ctx.fill();
+    ctx.fillStyle = getVar('--lime');
+    x=xForTP(lv.dewpt_c,lv.pressure_hpa);
+    ctx.beginPath(); ctx.arc(x,y,2.5,0,7); ctx.fill();
+  });
+  // Legend
+  ctx.font='10px monospace';
+  ctx.fillStyle=getVar('--coral'); ctx.fillText('— Temperature', padL+8, padT+12);
+  ctx.fillStyle=getVar('--lime'); ctx.fillText('— Dewpoint', padL+8, padT+24);
+}
+
+// Real flight-track visualization -- the user: "I need the flight of the
+// radiosonde to be visible - the track, and I need all the Lvl ... hgt all
+// plotted on the track". Returns an array of Leaflet layers (one polyline +
+// one clickable point per real level), NOT auto-added to the map -- caller
+// registers each under the 'SONDE_TRACK' family so the existing generic
+// layer-toggle system controls visibility, off by default to avoid clutter.
+// Circle glyphs per the user's explicit instruction ("The radiosonde tracks
+// need to be circle not squares") -- an earlier round used a rotated-square
+// diamond instead, on my own unasked call, to avoid a real visual collision
+// with co-located ASOS circles (e.g. TFX's launch point is 1.35km from the
+// real GTF ASOS, both aqua). the user overruled that; circles it is.
+function makeDriftTrackPointIcon(isLaunch){
+  const size = isLaunch ? 15 : 11;
+  return L.divIcon({className:'', html:
+    '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+getVar('--aqua')+
+    ';border:1.5px solid #0a1722"></div>',
+    iconSize:[size,size], iconAnchor:[size/2,size/2]});
+}
+function makeDriftTrackLayers(sd, distLabel){
+  if(!sd.drift_track || sd.drift_track.length<2) return [];
+  const layers = [];
+  const latlngs = sd.drift_track.map(p=>[p.lat,p.lon]);
+  layers.push(L.polyline(latlngs, {color:getVar('--aqua'), weight:2, opacity:0.75, dashArray:'2,7'})
+    .bindTooltip(sd.site+': '+driftBasisLabel(sd.drift_basis), {sticky:true}));
+  sd.drift_track.forEach(pt=>{
+    const isLaunch = pt.label==='Surface';
+    layers.push(L.marker([pt.lat,pt.lon], {icon:makeDriftTrackPointIcon(isLaunch)})
+      .bindPopup(trackPointPopupHtml(sd, pt, distLabel), {maxWidth:260}));
+  });
+  return layers;
+}
+
+// ---- Real 3D flight-track export (KML), for viewing in Google Earth Pro --
+// the user: "I want to explore ... another popout or call that provides a 3D
+// view of the radiosonde flight ... take the individual point measurements
+// and use Google Earth Pro or something to make a KML." Built entirely from
+// the same real sd.drift_track points already used for the 2D map track and
+// popups -- no new backend call, no new data. A LineString with
+// altitudeMode=absolute renders as a genuine 3D ascent path in Google Earth
+// Pro (not flattened to the ground), and each level gets its own extruded
+// Point placemark (a vertical stem down to the ground) so height at each
+// measurement reads at a glance, plus a description with the same
+// pressure/height/temp/dewpoint/wind fields as the web popup.
+function kmlEscape(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function buildFlightKML(sd){
+  const pts = (sd.drift_track||[]).filter(p=>p.height_m!=null && p.lat!=null && p.lon!=null);
+  const coordStr = pts.map(p=>p.lon+','+p.lat+','+p.height_m).join(' ');
+  const placemarks = pts.map(p=>{
+    const label = sondeLevelLabel(p.label);
+    const timeText = trackPointObservedTime(sd, p) || '—';
+    // Real absolute timestamp (not just the display string) for a native
+    // KML <TimeStamp>, per the user's ask ("I want time and alitute in meters
+    // included in the KML output") -- lets Google Earth's own time slider
+    // use it, not just a line of description text.
+    const whenDate = (sd.launch_utc && p.t_s!=null) ? new Date(new Date(sd.launch_utc).getTime()+p.t_s*1000) : null;
+    const timeStampEl = whenDate ? '<TimeStamp><when>'+whenDate.toISOString()+'</when></TimeStamp>' : '';
+    const heightM = Math.round(p.height_m);
+    const heightText = heightM+' m'+(p.height_basis==='standard_atmosphere_estimate'?' (std. atm. est.)':'');
+    const desc = [
+      'Level: '+label,
+      'Pressure: '+(p.pressure_hpa!=null?p.pressure_hpa+' hPa':'—'),
+      'Height: '+heightText,
+      'Temp: '+fmt(p.temp_c,' C',1),
+      'Dewpoint: '+fmt(p.dewpt_c,' C',1),
+      'Wind: '+(p.wind_dir!=null?Math.round(p.wind_dir)+'deg / ':'')+fmt(p.wind_kt,' kt',0),
+      'Time: '+timeText
+    ].map(kmlEscape).join('<br/>');
+    // Altitude (meters) and time right in the placemark name too, so both
+    // are visible at a glance in Google Earth's Places list, not just
+    // inside the description balloon.
+    return '<Placemark><name>'+kmlEscape(label+' hPa · '+heightM.toLocaleString()+' m'+(whenDate?' · '+timeText:''))+'</name>'+
+      timeStampEl+
+      '<description><![CDATA['+desc+']]></description>'+
+      '<styleUrl>#sondePoint</styleUrl>'+
+      '<Point><extrude>1</extrude><altitudeMode>absolute</altitudeMode>'+
+      '<coordinates>'+p.lon+','+p.lat+','+p.height_m+'</coordinates></Point></Placemark>';
+  }).join('\n');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'+
+    '<kml xmlns="http://www.opengis.net/kml/2.2">\n'+
+    '<Document>\n'+
+    '<name>'+kmlEscape(sd.site+' ('+(sd.name||'')+') Radiosonde Flight')+'</name>\n'+
+    '<description>'+kmlEscape('Real dead-reckoned flight track. '+launchTimeText(sd)+'. Position modeled from the reported wind profile, not GPS-observed. Height is geopotential height (real reported at some levels, US Standard Atmosphere estimate elsewhere -- see each point).')+'</description>\n'+
+    '<Style id="sondeLine"><LineStyle><color>ffd6cf46</color><width>3</width></LineStyle></Style>\n'+
+    '<Style id="sondePoint"><IconStyle><color>ffd6cf46</color><scale>0.9</scale>'+
+    '<Icon><href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon></IconStyle>'+
+    '<LineStyle><color>ffd6cf46</color><width>1</width></LineStyle></Style>\n'+
+    '<Placemark><name>Flight Path</name><styleUrl>#sondeLine</styleUrl>'+
+    '<LineString><extrude>0</extrude><tessellate>1</tessellate><altitudeMode>absolute</altitudeMode>'+
+    '<coordinates>'+coordStr+'</coordinates></LineString></Placemark>\n'+
+    placemarks+'\n'+
+    '</Document></kml>';
+}
+function downloadFlightKML(site){
+  const sd = sondeDataBySite[site];
+  if(!sd || !sd.drift_track || sd.drift_track.length<2) return;
+  const kml = buildFlightKML(sd);
+  const blob = new Blob([kml], {type:'application/vnd.google-earth.kml+xml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = site+'_flight_'+(sd.launch_utc||'').slice(0,10)+'.kml';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
+}
+
+// ---- Shared STATION LAYERS sidebar -- used by BOTH the fire view and the
+// click-anywhere point query, so a queried point gets the same full network
+// breakdown/toggles a fire does, not just a small floating counter. Only one
+// of fireLayer/pointLayer is ever "current" at a time (mutual exclusivity
+// below), so one shared marker list + netState is enough. ----
+const fireLayer = L.layerGroup().addTo(map);
+const pointLayer = L.layerGroup().addTo(map);
+let currentStationMarkers = []; // {marker, family}
+let currentLayerGroup = null;
+const netState = {};
+
+// ---- GOES satellite (NASA GIBS WMTS, real live tiles -- confirmed the
+// current layer IDs and URL template directly against GIBS's own
+// GetCapabilities rather than trusting an old assumption, since GIBS layer
+// names/products do change over time). GOES-East vs GOES-West is chosen by
+// longitude (roughly the operational split near the Rockies/Divide) -- not
+// a user toggle, since only one of the two actually covers a given point
+// well. Off by default (checkboxes), added to whichever layer group is
+// current so they get cleared automatically along with everything else. ----
+function goesSatellite(lon){ return lon <= -105 ? 'GOES-West' : 'GOES-East'; }
+// Fire Temperature was dropped per the user's call ("don't [know] what the fuck
+// that is"); IR (Band 13 clean infrared, day+night) added back per his ask
+// for "IR as well as GeoColor" -- both verified live against GIBS's own
+// GetCapabilities before wiring in (real layer IDs, real native zoom caps:
+// GeoColor caps at 7, IR at 6 -- IR's sensor has coarser native resolution).
+const GOES_PRODUCTS = [
+  {key:'GeoColor', id:'ABI_GeoColor', label:'GeoColor (true color)', tms:'GoogleMapsCompatible_Level7', mz:7},
+  {key:'IR', id:'ABI_Band13_Clean_Infrared', label:'Infrared (Band 13, day+night)', tms:'GoogleMapsCompatible_Level6', mz:6},
+];
+function makeGoesLayer(satellite, product){
+  return L.tileLayer(
+    'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/'+satellite+'_'+product.id+'/default/default/'+product.tms+'/{z}/{y}/{x}.png',
+    {maxNativeZoom:product.mz, maxZoom:18, opacity:0.85, pane:'goesPane', attribution:'NASA GIBS / '+satellite}
+  );
+}
+
+// ---- Real animated GOES loop, same technique as RapidWatch's Live Event
+// tab: GIBS serves each product on a 10-min time step but individual steps
+// are often missing, so candidate frames are probed (a single test tile)
+// before being animated -- only ones that actually return imagery play. ----
+function goesTileURLAt(satellite, product, time){
+  return 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/'+satellite+'_'+product.id+'/default/'+time+'/'+product.tms+'/{z}/{y}/{x}.png';
+}
+function goesStamps(n){ // newest-first 10-min stamps, skipping the ~20 min ingest lag
+  const out=[], base=new Date(Date.now()-20*6e4);
+  base.setUTCMinutes(Math.floor(base.getUTCMinutes()/10)*10,0,0);
+  for(let i=0;i<n;i++) out.push(new Date(base.getTime()-i*6e5).toISOString().slice(0,16)+':00Z');
+  return out;
+}
+function lonLatToTile(lon, lat, z){
+  // Probe tile is computed from the actual queried point, not a hardcoded
+  // region -- this is what makes the animation work the same way whether
+  // the query is CONUS, Alaska, or Hawaii, not just the Gulf sector.
+  const n = Math.pow(2, z);
+  const x = Math.floor((lon+180)/360*n);
+  const latRad = lat*Math.PI/180;
+  const y = Math.floor((1 - Math.log(Math.tan(latRad)+1/Math.cos(latRad))/Math.PI)/2*n);
+  return {x: Math.max(0,Math.min(n-1,x)), y: Math.max(0,Math.min(n-1,y))};
+}
+function goesFrameProbe(satellite, product, time, tile){
+  return new Promise(res=>{
+    const im = new Image();
+    im.onload=()=>res(true); im.onerror=()=>res(false);
+    im.src = goesTileURLAt(satellite, product, time).replace('{z}/{y}/{x}', '4/'+tile.y+'/'+tile.x);
+  });
+}
+const GOES_ANIM_SPEEDS = [{lab:'¼×', ms:2400}, {lab:'½×', ms:1200}, {lab:'1×', ms:600}, {lab:'2×', ms:300}];
+let goesAnim = null; // {frames, targetLayerGroup, entry, timer, idx, speedMs, tick}
+function goesAnimStop(){
+  if(!goesAnim) return;
+  clearInterval(goesAnim.timer);
+  goesAnim.frames.forEach(f=>goesAnim.targetLayerGroup.removeLayer(f.lyr));
+  // Restore the checkbox to a real, interactive state -- while animating it
+  // was forced checked (so imagery visibly on screen was never paired with
+  // an unchecked box) but no longer forced disabled -- see the checkbox
+  // listener in renderSatelliteLayers, which now calls this same function
+  // when the checkbox itself is unchecked mid-animation. Real bug found
+  // live 2026-09-06: the user "turn on GOES geocolor and I can't unclick it" --
+  // the checkbox used to be truly disabled while animating, so clicking it
+  // was a silent no-op and the only way off was the separate Stop button.
+  goesAnim.entry.checkbox.checked = false;
+  goesAnim.entry.checkbox.disabled = false;
+  const btn = document.getElementById('goesAnimBtn');
+  const timeLabel = document.getElementById('goesAnimTime');
+  if(btn) btn.textContent = '▶ Animate';
+  if(timeLabel) timeLabel.textContent = 'static';
+  goesAnim = null;
+}
+async function goesAnimToggle(satellite, lat, lon, targetLayerGroup, productState){
+  const btn = document.getElementById('goesAnimBtn');
+  const timeLabel = document.getElementById('goesAnimTime');
+  if(goesAnim){
+    goesAnimStop();
+    return;
+  }
+  // Animate whichever product is currently checked; default to GeoColor.
+  const entry = Object.values(productState).find(p=>p.checkbox.checked) || productState.GeoColor;
+  const product = entry.product;
+  btn.disabled = true; btn.textContent = 'Loading…'; timeLabel.textContent = 'probing recent frames…';
+  const tile = lonLatToTile(lon, lat, 4);
+  const stamps = goesStamps(14);
+  const okFlags = await Promise.all(stamps.map(t=>goesFrameProbe(satellite, product, t, tile)));
+  btn.disabled = false;
+  const good = stamps.filter((t,i)=>okFlags[i]).reverse(); // oldest -> newest
+  if(good.length<2){ btn.textContent='▶ Animate'; timeLabel.textContent='no recent frames available'; return; }
+  const frames = good.map(t=>({t, lyr:L.tileLayer(goesTileURLAt(satellite,product,t), {opacity:0, pane:'goesPane', maxNativeZoom:product.mz, maxZoom:18})}));
+  frames.forEach(f=>f.lyr.addTo(targetLayerGroup));
+  if(entry.checkbox.checked) targetLayerGroup.removeLayer(entry.layer);
+  // Checkbox now reflects reality: GOES IS showing (via animation frames),
+  // so it reads checked. Left enabled (not disabled) so unchecking it is
+  // always a real, working "turn this off" action -- its change listener
+  // (in renderSatelliteLayers) detects this checkbox is the one driving the
+  // active animation and calls goesAnimStop() too.
+  entry.checkbox.checked = true;
+  goesAnim = {frames, targetLayerGroup, entry, speedMs:600, idx:0, timer:null};
+  goesAnim.tick = ()=>{
+    frames.forEach((f,i)=>f.lyr.setOpacity(i===goesAnim.idx?0.85:0));
+    const d = new Date(frames[goesAnim.idx].t);
+    timeLabel.textContent = String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+'Z';
+    goesAnim.idx = (goesAnim.idx+1)%frames.length;
+  };
+  goesAnim.timer = setInterval(goesAnim.tick, goesAnim.speedMs);
+  goesAnim.tick();
+  btn.textContent = '⏸ Stop';
+}
+
+function renderSatelliteLayers(lat, lon, targetLayerGroup){
+  const satellite = goesSatellite(lon);
+  document.getElementById('satLabel').textContent = 'Satellite — '+satellite+' (auto-selected)';
+  const satLayersEl = document.getElementById('satLayers');
+  satLayersEl.innerHTML = '';
+
+  const productState = {}; // key -> {product, layer, checkbox}
+  GOES_PRODUCTS.forEach(product=>{
+    const layer = makeGoesLayer(satellite, product);
+    const row = document.createElement('label'); row.className='layer';
+    row.innerHTML = '<span class="mk" style="background:var(--gold);border-radius:2px"></span>'+
+      '<span class="lbl">'+product.label+'</span><input type="checkbox" style="margin-left:auto">';
+    const checkbox = row.querySelector('input');
+    checkbox.addEventListener('change', e=>{
+      if(e.target.checked){ layer.addTo(targetLayerGroup); return; }
+      targetLayerGroup.removeLayer(layer);
+      // Unchecking this box is always a real "turn it off" action, even
+      // when an active animation (not this static layer) is what's really
+      // driving the imagery on screen right now -- stop that too.
+      if(goesAnim && goesAnim.entry === productState[product.key]) goesAnimStop();
+    });
+    satLayersEl.appendChild(row);
+    productState[product.key] = {product, layer, checkbox};
+  });
+
+  const animRow = document.createElement('div'); animRow.className = 'sat-anim-row';
+  animRow.innerHTML = '<button id="goesAnimBtn" class="clr">▶ Animate</button><span id="goesAnimTime" class="mono">static</span>';
+  satLayersEl.appendChild(animRow);
+  const speedRow = document.createElement('div'); speedRow.className = 'sat-speed-row';
+  GOES_ANIM_SPEEDS.forEach(s=>{
+    const b = document.createElement('button'); b.textContent = s.lab;
+    if(s.ms===600) b.classList.add('on');
+    b.addEventListener('click', ()=>{
+      [...speedRow.children].forEach(c=>c.classList.remove('on'));
+      b.classList.add('on');
+      if(goesAnim){ goesAnim.speedMs=s.ms; clearInterval(goesAnim.timer); goesAnim.timer=setInterval(goesAnim.tick, s.ms); }
+    });
+    speedRow.appendChild(b);
+  });
+  satLayersEl.appendChild(speedRow);
+  document.getElementById('goesAnimBtn').addEventListener('click', ()=>{
+    goesAnimToggle(satellite, lat, lon, targetLayerGroup, productState);
+  });
+
+  renderModisImageryLayers(satLayersEl, targetLayerGroup);
+  renderLandsatImageryLayer(satLayersEl, targetLayerGroup, lat, lon);
+  renderOrbitalPathLayers(satLayersEl, targetLayerGroup);
+}
+
+// ---- Real Landsat imagery -- the actual latest available scene, not a
+// composite. the user: "keep trying on Landsat... figure it out" after the USGS
+// LandsatLook ImageServer returned a flat 403 on every request tried
+// (browser fetch, curl with a real Chrome UA, curl with a Referer header --
+// verified dead, not assumed). Root cause found afterward: USGS's own
+// public STAC search API (landsatlook.usgs.gov/stac-server) DOES work and
+// returns real, current scene metadata with no login -- but every actual
+// image asset under landsatlook.usgs.gov/data/... (even the small
+// thumbnail) redirects to a required USGS EROS login page, confirmed by
+// following the redirect and finding a real "Login - EROS Registration
+// System" page, not a guess.
+//
+// Working alternative, verified live: Microsoft Planetary Computer mirrors
+// the identical USGS Landsat Collection 2 archive with NO login required,
+// and exposes a real titiler-backed XYZ tile endpoint
+// (planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad/
+// {z}/{x}/{y}...) with Access-Control-Allow-Origin:* -- confirmed with a
+// real fetch returning a real 256x256 PNG tile. Their public STAC search
+// (api/stac/v1/search) is also CORS-open and returns the real scene actually
+// found live for Great Falls, MT: LC09_L2SP_039027_20260831..., Landsat 9,
+// 2026-08-31, 0.17% cloud cover -- 6 days old at time of verification, a
+// genuinely "latest available" scene, not a monthly/annual composite like
+// GIBS's WELD layers.
+// Real fix, verified by directly comparing rendered tiles (not assumed from
+// docs): Collection 2 Level 2 surface-reflectance bands are raw scaled
+// digital numbers (real reflectance = DN*0.0000275-0.2, USGS's own
+// documented formula), and without an explicit `rescale` param titiler
+// renders them against the full uint16 range -- looks dark/muddy. the user:
+// "the landsat scence are too dark." Fetched the same tile with and without
+// rescale=7272,22727 (the real physical DN range for a practical
+// land-surface reflectance window) via curl and looked at both PNGs
+// directly -- the rescaled one is a normal-looking, properly bright/
+// contrasted true-color image; the un-rescaled one is genuinely too dark.
+const LANDSAT_RESCALE = '7272,22727';
+const LANDSAT_COLOR_FORMULA = 'gamma RGB 2.5, saturation 1.3, sigmoidal RGB 10 0.3';
+const landsatSceneCache = {}; // "latRound,lonRound" -> [{tileUrl, dateStr, platform, cloudPct, bbox}, ...]
+// Same real 75mi radius used everywhere else in this app (radius_km=120.7008
+// on every /api/point and /api/fire call, and the dashed search circle on
+// the map) -- the user: "do you know the fucking 75 mile radius around the
+// point?" after the first version only searched a small bbox near the exact
+// clicked point (a single Landsat scene is only ~185km/115mi across, so a
+// 150-mile-diameter search circle can genuinely need more than one).
+const FIREVIEW_RADIUS_KM = 120.7008;
+function radiusBboxDeg(lat, lon, radiusKm){
+  const dLat = radiusKm / 111.32;
+  const dLon = radiusKm / (111.32 * Math.cos(lat*Math.PI/180));
+  return (lon-dLon)+','+(lat-dLat)+','+(lon+dLon)+','+(lat+dLat);
+}
+async function findLandsatScenesInRadius(lat, lon){
+  const latR = Math.round(lat*10)/10, lonR = Math.round(lon*10)/10;
+  const cacheKey = latR+','+lonR;
+  if(cacheKey in landsatSceneCache) return landsatSceneCache[cacheKey];
+  const bbox = radiusBboxDeg(lat, lon, FIREVIEW_RADIUS_KM);
+  const url = 'https://planetarycomputer.microsoft.com/api/stac/v1/search?bbox='+bbox+
+    '&limit=60&sortby=-datetime&collections=landsat-c2-l2';
+  let result = [];
+  try{
+    const r = await fetch(url);
+    const j = await r.json();
+    // Landsat 7's SLC-off scan-line gaps (a real, documented sensor defect
+    // since 2003) are skipped outright rather than shown as if intact.
+    const feats = (j.features||[]).filter(f => f.properties.platform !== 'landsat-7');
+    // Group by the real WRS-2 path/row -- each is a genuinely distinct
+    // scene footprint, so this is how the radius actually gets filled with
+    // multiple real adjacent scenes instead of one scene repeated.
+    const groups = {};
+    feats.forEach(f=>{
+      const key = f.properties['landsat:wrs_path']+'_'+f.properties['landsat:wrs_row'];
+      (groups[key] = groups[key]||[]).push(f);
+    });
+    // Clearest scene per real footprint, not just newest -- a mosaic tile
+    // buried under 80% cloud is worse than a slightly older clear one.
+    result = Object.values(groups).map(group=>{
+      group.sort((a,b)=>(a.properties['eo:cloud_cover']||0)-(b.properties['eo:cloud_cover']||0));
+      const pick = group[0];
+      const params = 'collection=landsat-c2-l2&item='+encodeURIComponent(pick.id)+
+        '&assets=red&assets=green&assets=blue&rescale='+LANDSAT_RESCALE+
+        '&color_formula='+encodeURIComponent(LANDSAT_COLOR_FORMULA)+'&format=png';
+      return {
+        tileUrl: 'https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad/{z}/{x}/{y}@1x?'+params,
+        dateStr: pick.properties.datetime.slice(0,10),
+        // Full name (e.g. "Landsat 9"), not the abbreviated "L9" -- the user:
+        // "Can you add what version of Landsat?"
+        platform: 'Landsat '+(pick.properties.platform||'').replace('landsat-',''),
+        cloudPct: Math.round(pick.properties['eo:cloud_cover']||0),
+        // Real per-scene footprint (~185km across) -- bounds the tile layer
+        // so Leaflet only requests tiles that can actually overlap it,
+        // instead of tiling the whole viewport and hitting harmless-but-
+        // noisy 404 "outside bounds" responses everywhere else.
+        bbox: pick.bbox
+      };
+    });
+  }catch(e){ result = []; } // real fetch failure -- don't fabricate a scene
+  landsatSceneCache[cacheKey] = result;
+  return result;
+}
+function renderLandsatImageryLayer(satLayersEl, targetLayerGroup, lat, lon){
+  const label = document.createElement('div'); label.className = 'layerGroupLabel';
+  // Named explicitly (not just "Landsat") -- the user: "I want it labeled
+  // Landsat 8 and 9 or whatever it is." Static list, not computed per query
+  // -- the code already filters out Landsat 7 outright (its real SLC-off
+  // scan-line defect), so 8 and 9 are the only platforms this ever shows.
+  label.textContent = 'Landsat 8 & 9 Imagery (real latest scenes, not fire-gated)';
+  satLayersEl.appendChild(label);
+  const row = document.createElement('label'); row.className='layer';
+  row.innerHTML = '<span class="mk" style="background:var(--gold);border-radius:2px"></span>'+
+    '<span class="lbl">Landsat 8 & 9 (real scenes covering the 75mi radius)</span><input type="checkbox" style="margin-left:auto">';
+  const checkbox = row.querySelector('input');
+  const status = document.createElement('div'); status.className = 'sat-empty'; status.style.paddingLeft='19px';
+  let layers = [];
+  checkbox.addEventListener('change', async e=>{
+    if(!e.target.checked){ layers.forEach(l=>targetLayerGroup.removeLayer(l)); layers=[]; status.textContent=''; return; }
+    checkbox.disabled = true; status.textContent = 'searching USGS/Planetary Computer catalog…';
+    const scenes = await findLandsatScenesInRadius(lat, lon);
+    checkbox.disabled = false;
+    if(!checkbox.checked) return; // unchecked again while searching
+    if(!scenes.length){ checkbox.checked=false; status.textContent='No real Landsat scenes found near this point'; return; }
+    layers = scenes.map(scene=>{
+      const tileOpts = {opacity:0.85, pane:'goesPane', attribution:scene.platform+' ('+scene.dateStr+') via USGS / Microsoft Planetary Computer'};
+      if(scene.bbox) tileOpts.bounds = L.latLngBounds([scene.bbox[1],scene.bbox[0]], [scene.bbox[3],scene.bbox[2]]);
+      return L.tileLayer(scene.tileUrl, tileOpts).addTo(targetLayerGroup);
+    });
+    const dates = [...new Set(scenes.map(s=>s.dateStr))].sort();
+    const dateRange = dates.length>1 ? dates[0]+' to '+dates[dates.length-1] : dates[0];
+    const platforms = [...new Set(scenes.map(s=>s.platform))].sort();
+    // Per-scene platform/date/cloud breakdown, not just an aggregate line --
+    // the user asked specifically which Landsat version each scene is.
+    const perScene = scenes.map(s=>s.platform+' '+s.dateStr+' ('+s.cloudPct+'% cloud)').join(', ');
+    status.textContent = scenes.length+' real scene'+(scenes.length===1?'':'s')+' · '+platforms.join(' + ')+' · '+dateRange+
+      ' · '+perScene+' · WRS-2 path/row grid, source: Planetary Computer mirror of USGS Landsat Collection 2';
+  });
+  satLayersEl.appendChild(row);
+  satLayersEl.appendChild(status);
+}
+
+// ---- MODIS true-color daily global imagery (Terra + Aqua) -- real imagery
+// available regardless of any fire, per the user's ask ("MODIS images available
+// even if not related to fire"). Real GIBS quirk found live, not assumed:
+// unlike GOES, this layer's "default" time keyword does NOT resolve to the
+// latest date (today's mosaic 404s until it's fully processed) -- so the
+// actual latest available date is probed for (today, then back day by day)
+// instead of hardcoding an assumed lag.
+const MODIS_IMAGERY = [
+  {key:'Terra', id:'MODIS_Terra_CorrectedReflectance_TrueColor', label:'MODIS Terra — True Color (daily)'},
+  {key:'Aqua', id:'MODIS_Aqua_CorrectedReflectance_TrueColor', label:'MODIS Aqua — True Color (daily)'},
+];
+const modisDateCache = {}; // "layerId@zoom" -> resolved YYYY-MM-DD, cached for the page session
+// Real GIBS behavior found live, not assumed: a coarse zoom (e.g. 4) for
+// "today" can return 200 while the SAME date's tiles at a finer zoom
+// (e.g. 6) still 404/503 -- daily mosaics are generated progressively, and
+// coarser levels finish first. Probing at a fixed low zoom (the original
+// bug -- the user's "why is MODIS AQUA not working?" traced to exactly this:
+// a real 404/503 on today's tiles at the map's actual zoom, while the
+// probe's z4 tile had already come back 200) picks a date that isn't
+// actually ready at the zoom that will really be requested. Now probes at
+// the SAME zoom the tiles will render at (capped to the layer's native
+// max), and caches per zoom bucket rather than per layer alone.
+function modisDateProbe(layerId, dateStr, tile){
+  return new Promise(res=>{
+    const im = new Image();
+    im.onload=()=>res(true); im.onerror=()=>res(false);
+    im.src = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/'+layerId+'/default/'+dateStr+'/GoogleMapsCompatible_Level9/'+tile.z+'/'+tile.y+'/'+tile.x+'.jpg';
+  });
+}
+async function resolveModisDate(layerId, lat, lon, zoom){
+  const z = Math.min(Math.max(zoom||4, 0), 9); // native cap is 9
+  const cacheKey = layerId+'@'+z;
+  if(modisDateCache[cacheKey]) return modisDateCache[cacheKey];
+  const tile = lonLatToTile(lon, lat, z); tile.z = z;
+  for(let back=0; back<5; back++){
+    const d = new Date(Date.now() - back*86400000);
+    const dateStr = d.toISOString().slice(0,10);
+    if(await modisDateProbe(layerId, dateStr, tile)){ modisDateCache[cacheKey] = dateStr; return dateStr; }
+  }
+  return null;
+}
+function renderModisImageryLayers(satLayersEl, targetLayerGroup){
+  const label = document.createElement('div'); label.className = 'layerGroupLabel';
+  label.textContent = 'MODIS Imagery (daily, global)';
+  satLayersEl.appendChild(label);
+  MODIS_IMAGERY.forEach(product=>{
+    const row = document.createElement('label'); row.className='layer';
+    row.innerHTML = '<span class="mk" style="background:var(--amber-soft);border-radius:2px"></span>'+
+      '<span class="lbl">'+product.label+'</span><input type="checkbox" style="margin-left:auto">';
+    const checkbox = row.querySelector('input');
+    let layer = null;
+    checkbox.addEventListener('change', async e=>{
+      if(!e.target.checked){ if(layer) targetLayerGroup.removeLayer(layer); return; }
+      checkbox.disabled = true;
+      const dateStr = await resolveModisDate(product.id, map.getCenter().lat, map.getCenter().lng, map.getZoom());
+      checkbox.disabled = false;
+      if(!checkbox.checked) return; // unchecked again while probing
+      if(!dateStr){ checkbox.checked=false; return; }
+      layer = L.tileLayer(
+        'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/'+product.id+'/default/'+dateStr+'/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg',
+        {maxNativeZoom:9, maxZoom:18, opacity:0.85, pane:'goesPane', attribution:'NASA GIBS / MODIS '+product.key}
+      ).addTo(targetLayerGroup);
+    });
+    satLayersEl.appendChild(row);
+  });
+}
+// ---- Real MODIS/VIIRS orbital ground tracks, per the user's ask ("MODIS
+// orbital paths, VIRRS path") -- not imagery/detections, the actual current
+// orbit path of each satellite. Live TLEs come from api_server.py's
+// /api/tle (CelesTrak has no CORS header, confirmed live -- must be
+// server-fetched, see recorder/orbital_tracks.py), propagated client-side
+// with satellite.js (real SGP4, the standard library for this). Grouped by
+// sensor family (MODIS: Terra+Aqua: VIIRS: Suomi NPP+NOAA-20+NOAA-21),
+// matching how the Active Fire Detections layers are already grouped,
+// rather than one checkbox per satellite. ----
+// Satellite/agency facts, verified live 2026-09-06 (not assumed):
+// Suomi NPP (Suomi National Polar-orbiting Partnership, launched 2011) is
+// the genuinely joint NASA/NOAA satellite that carries VIIRS -- built under
+// the original NPOESS program, operated jointly. NOAA-20 and NOAA-21 also
+// carry VIIRS (the JPSS-1/JPSS-2 follow-ons) but are NOAA-operated, not
+// joint NASA/NOAA in the same sense. Terra and Aqua (MODIS) are both NASA
+// satellites, no NOAA involvement. Display names below use each satellite's
+// real name, not the raw CelesTrak/TLE lookup key.
+const ORBITAL_DISPLAY_NAMES = {'TERRA':'Terra','AQUA':'Aqua','SUOMI NPP':'Suomi NPP','NOAA 20':'NOAA-20','NOAA 21':'NOAA-21'};
+const ORBITAL_GROUPS = {
+  MODIS: {label:'MODIS orbital path (Terra + Aqua)', color:'--amber-soft', sats:['TERRA','AQUA']},
+  VIIRS: {label:'VIIRS orbital path (Suomi NPP + NOAA-20/21)', color:'--coral', sats:['SUOMI NPP','NOAA 20','NOAA 21']},
+};
+let tleFetchPromise = null;
+function fetchTles(){
+  if(!tleFetchPromise) tleFetchPromise = fetch(API_BASE+'/api/tle').then(r=>r.json());
+  return tleFetchPromise;
+}
+function groundTrackSegments(satrec, minutesBack, minutesFwd, stepMin){
+  // Split into separate polylines wherever longitude wraps the antimeridian
+  // -- a single polyline crossing +180/-180 would otherwise draw one long
+  // line clear across the map instead of two short ones at the edge.
+  const segments = []; let current = [];
+  for(let m=-minutesBack; m<=minutesFwd; m+=stepMin){
+    const t = new Date(Date.now() + m*60000);
+    const pv = satellite.propagate(satrec, t);
+    if(!pv.position){ if(current.length>1) segments.push(current); current=[]; continue; }
+    const gmst = satellite.gstime(t);
+    const geo = satellite.eciToGeodetic(pv.position, gmst);
+    const lat = satellite.degreesLat(geo.latitude), lon = satellite.degreesLong(geo.longitude);
+    if(current.length && Math.abs(lon - current[current.length-1][1]) > 180){
+      if(current.length>1) segments.push(current);
+      current = [];
+    }
+    current.push([lat, lon]);
+  }
+  if(current.length>1) segments.push(current);
+  return segments;
+}
+function currentSatPosition(satrec){
+  const t = new Date();
+  const pv = satellite.propagate(satrec, t);
+  if(!pv.position) return null;
+  const gmst = satellite.gstime(t);
+  const geo = satellite.eciToGeodetic(pv.position, gmst);
+  return {lat: satellite.degreesLat(geo.latitude), lon: satellite.degreesLong(geo.longitude)};
+}
+const orbitalLive = {}; // groupKey -> {timer, layers:[], targetLayerGroup}
+function stopOrbitalGroup(groupKey){
+  const live = orbitalLive[groupKey];
+  if(!live) return;
+  clearInterval(live.timer);
+  live.layers.forEach(l=>live.targetLayerGroup.removeLayer(l));
+  delete orbitalLive[groupKey];
+}
+async function startOrbitalGroup(groupKey, targetLayerGroup, statusEl){
+  const group = ORBITAL_GROUPS[groupKey];
+  statusEl.textContent = 'fetching orbital elements…';
+  let tles;
+  try{ tles = await fetchTles(); } catch(e){ statusEl.textContent = 'TLE fetch failed'; return; }
+  const draw = ()=>{
+    const prevTimer = orbitalLive[groupKey]?.timer;
+    if(orbitalLive[groupKey]) orbitalLive[groupKey].layers.forEach(l=>targetLayerGroup.removeLayer(l));
+    const layers = [];
+    let anyFound = false;
+    group.sats.forEach(satName=>{
+      const tle = tles[satName];
+      if(!tle) return; // real live-fetch gap for this one satellite -- skip, don't fabricate
+      anyFound = true;
+      const satrec = satellite.twoline2satrec(tle.line1, tle.line2);
+      groundTrackSegments(satrec, 50, 50, 1).forEach(seg=>{
+        // weight/opacity/dash bumped up from an earlier pass that was
+        // technically rendering but nearly invisible against the dark
+        // basemap (1.5px, 0.6 opacity, 1px-on/5px-off dash read as "not
+        // displaying" even though the layer was really there).
+        layers.push(L.polyline(seg, {color:getVar(group.color), weight:2.5, opacity:0.95, dashArray:'8,5'}).addTo(targetLayerGroup));
+      });
+      const pos = currentSatPosition(satrec);
+      if(pos){
+        const displayName = ORBITAL_DISPLAY_NAMES[satName] || satName;
+        const agencyNote = satName === 'SUOMI NPP'
+          ? 'Joint NASA/NOAA satellite (built under the original NPOESS program). Carries VIIRS.'
+          : satName === 'NOAA 20' || satName === 'NOAA 21'
+            ? 'NOAA-operated JPSS satellite. Carries VIIRS.'
+            : 'NASA satellite. Carries MODIS.';
+        const marker = L.circleMarker([pos.lat, pos.lon], {
+          radius:7, color:'#1a1408', weight:2, fillColor:getVar(group.color), fillOpacity:1
+        }).bindPopup('<div class="pop"><div class="pk">'+displayName+' — LIVE POSITION</div>'+
+          '<div class="row"><span>Lat/Lon</span><b>'+pos.lat.toFixed(2)+'°, '+pos.lon.toFixed(2)+'°</b></div>'+
+          '<div class="row" style="color:var(--ink);font-size:9.5px">'+agencyNote+'</div>'+
+          '<div class="row" style="color:var(--ink);font-size:9.5px">Propagated from live TLE (CelesTrak), not observed</div></div>')
+          .addTo(targetLayerGroup);
+        layers.push(marker);
+      }
+    });
+    orbitalLive[groupKey] = {timer: prevTimer, layers, targetLayerGroup};
+    statusEl.textContent = anyFound ? 'updated '+new Date().toUTCString().slice(17,25)+'Z' : 'no live elements available';
+  };
+  draw();
+  const timer = setInterval(draw, 30000); // real-time-ish position update, ground track redraw is cheap
+  orbitalLive[groupKey].timer = timer;
+}
+function renderOrbitalPathLayers(satLayersEl, targetLayerGroup){
+  const label = document.createElement('div'); label.className = 'layerGroupLabel';
+  label.textContent = 'Orbital Paths (live, not fire-gated)';
+  satLayersEl.appendChild(label);
+  Object.keys(ORBITAL_GROUPS).forEach(groupKey=>{
+    const group = ORBITAL_GROUPS[groupKey];
+    const row = document.createElement('label'); row.className='layer';
+    row.innerHTML = '<span class="mk" style="background:'+getVar(group.color)+'"></span>'+
+      '<span class="lbl">'+group.label+'</span><input type="checkbox" style="margin-left:auto">';
+    satLayersEl.appendChild(row);
+    const status = document.createElement('div'); status.className = 'sat-empty'; status.style.paddingLeft='19px';
+    satLayersEl.appendChild(status);
+    row.querySelector('input').addEventListener('change', e=>{
+      if(e.target.checked) startOrbitalGroup(groupKey, targetLayerGroup, status);
+      else { stopOrbitalGroup(groupKey); status.textContent=''; }
+    });
+  });
+}
+function clearSatelliteLayers(){
+  goesAnimStop();
+  nexradAnimStop();
+  Object.keys(ORBITAL_GROUPS).forEach(stopOrbitalGroup);
+  document.getElementById('satLabel').textContent = '';
+  document.getElementById('satLayers').innerHTML='';
+}
+
+function renderStationLayers(stations, snotel, soundings, cameras, viirs, modis, nexrad, targetLayerGroup, distLabel, generatedUtc, qLat, qLon){
+  currentStationMarkers = [];
+  currentLayerGroup = targetLayerGroup;
+  const netLayersEl = document.getElementById('netLayers');
+  const fireDetLayersEl = document.getElementById('fireDetLayers');
+  netLayersEl.innerHTML = '';
+  fireDetLayersEl.innerHTML = '';
+  for(const k of Object.keys(netState)) delete netState[k];
+
+  const familiesSeen = new Set();
+  stations.forEach(s=>{
+    const family = networkFamily(s.network);
+    familiesSeen.add(family);
+    currentStationMarkers.push({marker: makeStationMarker(s,distLabel).addTo(targetLayerGroup), family});
+  });
+  (snotel||[]).forEach(s=>{
+    const family = networkFamily(s.network);
+    familiesSeen.add(family);
+    currentStationMarkers.push({marker: makeSnotelMarker(s,distLabel).addTo(targetLayerGroup), family});
+  });
+  // No marker glyph at the launch site itself (the user: remove the symbols
+  // there) -- but the flight-track polyline + per-level points are a
+  // separate, toggleable "SONDE_TRACK" family (off by default -- created
+  // here but NOT added to targetLayerGroup, so they start hidden until the
+  // Flight Track checkbox in the sidebar turns them on via updateVisibility()).
+  let sondeTrackCount = 0;
+  (soundings||[]).forEach(sd=>{
+    makeDriftTrackLayers(sd, distLabel).forEach(layer=>{
+      currentStationMarkers.push({marker: layer, family:'SONDE_TRACK'});
+      sondeTrackCount++;
+    });
+  });
+  // The 300mi radiosonde search boundary itself, same toggle family as the
+  // flight track -- the user's ask, so a station that looks "too far away" can
+  // be checked against the real boundary visually instead of just trusting
+  // the sidebar note. Drawn whenever the query point is known, even with
+  // zero real sites returned (confirms the search area was still real).
+  if(qLat!=null && qLon!=null){
+    const sondeCircle = makeRadiusCircle(qLat, qLon, 300, getVar('--aqua'));
+    currentStationMarkers.push({marker: sondeCircle, family:'SONDE_TRACK'});
+  }
+  netState['SONDE_TRACK'] = false;
+  renderSoundingPanel(soundings, distLabel, sondeTrackCount);
+  (cameras||[]).forEach(c=>{
+    familiesSeen.add('MDTCAM');
+    currentStationMarkers.push({marker: makeCameraMarker(c,distLabel).addTo(targetLayerGroup), family:'MDTCAM'});
+  });
+
+  Array.from(familiesSeen).sort().forEach(fam=>{
+    netState[fam] = true;
+    const count = currentStationMarkers.filter(m=>m.family===fam).length;
+    const row = document.createElement('label'); row.className='layer';
+    row.innerHTML = '<span class="mk" style="background:'+familyColor(fam)+'"></span><span class="lbl">'+familyLabel(fam)+' <b>('+count+')</b></span>'+
+      '<input type="checkbox" checked style="margin-left:auto">';
+    row.querySelector('input').addEventListener('change', e=>{ netState[fam]=e.target.checked; updateVisibility(); });
+    netLayersEl.appendChild(row);
+  });
+
+  // Active fire detections get their own labeled group -- these are
+  // satellite-derived hotspots, not a ground instrument network, so they
+  // don't belong folded into the Ground Sensors list above. VIIRS and MODIS
+  // are two independently toggleable rows (different sensor, different real
+  // pixel resolution -- not the same layer at two confidence levels).
+  // ALWAYS show both rows, even at a real 0 count -- hiding the row entirely
+  // when a fire has no current hits (the common case: a satellite pass has
+  // to actually catch the fire) made the layer look like it was never built
+  // at all, which is exactly the confusion the user hit looking at Silvertip.
+  const fireDetRow = (fam, items, makeMarker)=>{
+    netState[fam] = true;
+    items.forEach(it=>{
+      currentStationMarkers.push({marker: makeMarker(it,distLabel).addTo(targetLayerGroup), family:fam});
+    });
+    const row = document.createElement('label'); row.className='layer';
+    if(!items.length) row.style.opacity = '0.5';
+    row.innerHTML = '<span class="mk" style="background:'+familyColor(fam)+'"></span><span class="lbl">'+familyLabel(fam)+' <b>('+items.length+')</b></span>'+
+      '<input type="checkbox" checked style="margin-left:auto"'+(items.length?'':' disabled')+'>';
+    row.querySelector('input').addEventListener('change', e=>{ netState[fam]=e.target.checked; updateVisibility(); });
+    fireDetLayersEl.appendChild(row);
+  };
+  fireDetRow('VIIRS', viirs||[], makeViirsMarker);
+  fireDetRow('MODIS', modis||[], makeModisMarker);
+  if(!(viirs||[]).length && !(modis||[]).length){
+    const note = document.createElement('div'); note.className = 'sat-empty';
+    note.textContent = 'No detections in the last 24h -- both feeds checked live, real result';
+    fireDetLayersEl.appendChild(note);
+  }
+
+  renderNexradLayers(nexrad, distLabel, targetLayerGroup);
+
+  const liveCount = stations.filter(s=>!isStale(s.valid_utc)).length;
+  document.getElementById('statCount').textContent =
+    stations.length+' surface + '+(snotel||[]).length+' SNOTEL wind stations · '+
+    liveCount+' live, '+(stations.length-liveCount)+' stale (>150 min)'+
+    (generatedUtc ? ' · updated '+generatedUtc : '');
+  document.getElementById('legend').style.display='block';
+}
+
+function clearStationLayers(){
+  currentStationMarkers = [];
+  currentLayerGroup = null;
+  document.getElementById('legend').style.display='none';
+  document.getElementById('netLayers').innerHTML='';
+  document.getElementById('fireDetLayers').innerHTML='';
+  document.getElementById('nexradLayers').innerHTML='';
+  document.getElementById('sondeList').innerHTML='';
+}
+
+function updateVisibility(){
+  if(!currentLayerGroup) return;
+  currentStationMarkers.forEach(({marker, family})=>{
+    const show = netState[family]!==false;
+    const has = currentLayerGroup.hasLayer(marker);
+    if(show && !has) currentLayerGroup.addLayer(marker);
+    if(!show && has) currentLayerGroup.removeLayer(marker);
+  });
+}
+
+// ---- Fire view ----
+function clearFire(){
+  fireLayer.clearLayers();
+  document.getElementById('fireCard').style.display='none';
+  document.getElementById('hdrTitle').textContent='';
+  if(currentLayerGroup===fireLayer) clearStationLayers();
+  clearSatelliteLayers();
+}
+
+function renderFire(data){
+  document.getElementById('empty').style.display='none';
+  clearFire();
+  clearPointQuery(); // one view at a time -- a new fire search releases any prior point query
+  const fire = data.fire;
+  document.getElementById('hdrTitle').textContent = 'Viewing: ' + fire.name + ' — ' + (fire.state||'').replace('US-','');
+  document.getElementById('readout').textContent = fire.lat.toFixed(2)+'°N  '+Math.abs(fire.lon).toFixed(2)+'°W';
+  document.getElementById('fireName').textContent = fire.name;
+  document.getElementById('fAcres').textContent = fire.acres!=null ? fire.acres.toLocaleString()+' ac' : '—';
+  document.getElementById('fContained').textContent = fire.percent_contained!=null ? fire.percent_contained+'%' : '—';
+  document.getElementById('fPersonnel').textContent = fire.personnel!=null ? fire.personnel : '—';
+  document.getElementById('fRegion').textContent = fire.region;
+  document.getElementById('fRadius').textContent = fire.radius_mi+' mi';
+  document.getElementById('fireCard').style.display='block';
+  map.setView([fire.lat, fire.lon], 8);
+
+  // Real mapped perimeter polygon when available (a jagged, irregular shape
+  // reads unmistakably as "fire" next to the round sensor markers) -- never
+  // a circle/dot standing in for the fire itself. Falls back to a flame
+  // glyph only when WFIGS has no mapped polygon yet (real gap, not rare --
+  // daily perimeter mapping lags a fast-moving fire by hours to a day+).
+  const firePopup =
+    '<div class="pop"><div class="pk">ACTIVE WILDFIRE'+(data.perimeter?' — MAPPED PERIMETER':' — NO MAPPED PERIMETER YET')+'</div><h4>'+fire.name+'</h4>'+
+    '<div class="row"><span>Size</span><b>'+(fire.acres!=null?fire.acres.toLocaleString()+' ac':'—')+'</b></div>'+
+    '<div class="row"><span>Contained</span><b>'+(fire.percent_contained!=null?fire.percent_contained+'%':'—')+'</b></div>'+
+    '<div class="row"><span>Personnel</span><b>'+(fire.personnel!=null?fire.personnel:'—')+'</b></div>'+
+    (data.perimeter ? (
+      '<div class="row"><span>Perimeter acres</span><b>'+data.perimeter.acres.toLocaleString(undefined,{maximumFractionDigits:1})+'</b></div>'+
+      '<div class="row"><span>Behavior</span><b>'+(data.perimeter.fire_behavior_general||'—')+'</b></div>'+
+      '<div class="row"><span>Source</span><b>'+data.perimeter.source+'</b></div>'
+    ) : '')+
+    '</div>';
+  if (data.perimeter) {
+    // NOT fitBounds to the polygon -- it's a few km across, tiny next to the
+    // 75+ mi sensor search radius; fitting to it would zoom in so far the
+    // sensor network this dashboard exists to show would vanish.
+    L.polygon(data.perimeter.rings, {
+      color: getVar('--coral'), weight: 2, fillColor: getVar('--coral'), fillOpacity: 0.35
+    }).addTo(fireLayer).bindPopup(firePopup);
+  } else {
+    const fireIcon = L.divIcon({className:'', html:
+      '<div style="font-size:20px">🔥</div>',
+      iconSize:[20,20], iconAnchor:[10,16]});
+    L.marker([fire.lat, fire.lon], {icon:fireIcon}).addTo(fireLayer).bindPopup(firePopup);
+  }
+  makeRadiusCircle(fire.lat, fire.lon, fire.radius_mi).addTo(fireLayer);
+
+  renderStationLayers(data.stations, data.snotel, data.soundings, data.cameras, data.viirs, data.modis, data.nexrad, fireLayer, 'fire', data.generated_utc, fire.lat, fire.lon);
+  renderSatelliteLayers(fire.lat, fire.lon, fireLayer);
+  setQueryArmed(false); // let the user pan around the fire without re-querying on every click
+}
+
+// ---- Fire-name search (ONE dashboard, any fire -- no more one static page
+// per fire). Hits api_server.py's /api/fire, which resolves the name via
+// live WFIGS the same way build_sensor_snapshot.py's CLI path always has. ----
+function searchErr(msg){
+  const el = document.getElementById('searchErr');
+  el.textContent = msg; el.style.display='block';
+  clearTimeout(searchErr._t); searchErr._t = setTimeout(()=>el.style.display='none', 6000);
+}
+function doFireSearch(){
+  const name = document.getElementById('fireSearchInput').value.trim();
+  if(!name) return;
+  document.getElementById('loading').style.display='flex';
+  fetch(API_BASE+'/api/fire?name='+encodeURIComponent(name))
+    .then(r=>r.json().then(j=>({ok:r.ok, status:r.status, j})))
+    .then(({ok, status, j})=>{
+      document.getElementById('loading').style.display='none';
+      if(!ok){
+        if(status===409 && j.ambiguous){
+          searchErr(j.matches.length+' matches for "'+name+'" — try a more specific name (e.g. include the state).');
+        } else {
+          searchErr(j.error || ('No active fire found matching "'+name+'"'));
+        }
+        return;
+      }
+      renderFire(j);
+    })
+    .catch(err=>{
+      document.getElementById('loading').style.display='none';
+      searchErr('Search failed: '+err.message+' — is api_server.py running on port 8940?');
+    });
+}
+document.getElementById('fireSearchBtn').addEventListener('click', doFireSearch);
+document.getElementById('fireSearchInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doFireSearch(); });
+
+// ---- Click-anywhere point query -- hits api_server.py's live endpoint so
+// ANY point on the map, fire or not, can pull its real surrounding sensor
+// network. Renders through the SAME left-sidebar STATION LAYERS panel a fire
+// does (renderStationLayers), not a separate floating summary -- the user's
+// explicit ask: "the left panel display of sensors need to appear" after a
+// point is queried, same as after a fire is chosen. ----
+const crosshairIcon = L.divIcon({className:'', html:
+  '<div style="width:22px;height:22px;position:relative">'+
+  '<div style="position:absolute;left:10px;top:0;width:2px;height:22px;background:'+getVar('--amber')+'"></div>'+
+  '<div style="position:absolute;top:10px;left:0;width:22px;height:2px;background:'+getVar('--amber')+'"></div>'+
+  '</div>', iconSize:[22,22], iconAnchor:[11,11]});
+
+function clearPointQuery(){
+  pointLayer.clearLayers();
+  document.getElementById('pointCard').style.display='none';
+  clearSatelliteLayers();
+  if(currentLayerGroup===pointLayer){
+    clearStationLayers();
+    document.getElementById('hdrTitle').textContent='';
+  }
+}
+document.addEventListener('click', e=>{ if(e.target.id==='ptClearBtn'){ clearPointQuery(); setQueryArmed(true); } });
+
+map.on('click', e=>{
+  if(!queryArmed) return; // disarmed -- this click is just panning, not a query
+  document.getElementById('empty').style.display='none';
+  clearFire(); // one view at a time -- a new point query releases any prior fire view
+  const {lat, lng} = e.latlng;
+  const loadingPt = map.latLngToContainerPoint(e.latlng);
+  const toast = document.createElement('div');
+  toast.id = 'ptLoading';
+  toast.style.left = loadingPt.x+'px'; toast.style.top = loadingPt.y+'px';
+  toast.textContent = 'QUERYING SENSORS… (~5-15s)';
+  document.getElementById('map').appendChild(toast);
+
+  fetch(API_BASE+'/api/point?lat='+lat+'&lon='+lng+'&radius_km=120.7008') // exactly 75 mi
+    .then(r=>{ if(!r.ok) return r.json().then(j=>{throw new Error(j.error||('HTTP '+r.status))}); return r.json(); })
+    .then(payload=>{
+      toast.remove();
+      clearPointQuery();
+      document.getElementById('hdrTitle').textContent = 'Viewing: queried point';
+      document.getElementById('readout').textContent = lat.toFixed(2)+'°N  '+Math.abs(lng).toFixed(2)+'°W';
+      document.getElementById('pointCoords').textContent = lat.toFixed(4)+'°, '+lng.toFixed(4)+'°';
+      document.getElementById('pRegion').textContent = payload.point.region;
+      document.getElementById('pRadius').textContent = payload.point.radius_mi+' mi';
+      document.getElementById('pointCard').style.display='block';
+      L.marker([lat,lng], {icon:crosshairIcon}).addTo(pointLayer)
+        .bindPopup('<div class="pop"><div class="pk">QUERIED POINT</div><h4>'+lat.toFixed(4)+'°, '+lng.toFixed(4)+'°</h4>'+
+          '<div class="row"><span>Region</span><b>'+payload.point.region+'</b></div>'+
+          '<div class="row"><span>Radius</span><b>'+payload.point.radius_mi+' mi</b></div></div>');
+      makeRadiusCircle(lat, lng, payload.point.radius_mi).addTo(pointLayer);
+      renderStationLayers(payload.stations, payload.snotel, payload.soundings, payload.cameras, payload.viirs, payload.modis, payload.nexrad, pointLayer, 'point', null, lat, lng);
+      renderSatelliteLayers(lat, lng, pointLayer);
+      setQueryArmed(false); // let the user pan around the result without re-querying on every click
+    })
+    .catch(err=>{
+      toast.remove();
+      showErr('<b>Point query failed</b><br>'+err.message+
+        '<br><span class="mono" style="color:var(--ink);font-size:10px">Is api_server.py running on port 8940?</span>');
+    });
+});
+</script>
+</body>
+</html>

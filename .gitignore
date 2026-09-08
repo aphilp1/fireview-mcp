@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.log
+
+# Local debug/test artifacts, not part of the product
+headers.txt
+test.json
+point_test2.json
+tile.png
+ktlx_cap.xml
+ktlx_refl.png
+ktlx_vel.png
+kftg_cap.xml
+pakc_cap.xml
+
+# Superseded per-fire static dashboards (replaced by the single live dashboard.html)
+fires/
