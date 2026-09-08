@@ -140,10 +140,10 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
 .layerGroupLabel:first-child{margin-top:0}
 .sat-anim-row{display:flex;align-items:center;gap:8px;padding:6px 0 2px 19px}
 .sat-anim-row .clr{width:auto;margin:0;padding:4px 11px;flex:none}
-#goesAnimTime{font-size:10.5px;color:var(--ink);min-width:0}
+#goesAnimTime,#nexradAnimTime{font-size:10.5px;font-weight:500;color:var(--ink);min-width:0}
 .sat-speed-row{display:flex;gap:4px;padding:5px 0 4px 19px}
 .sat-speed-row button{width:auto;flex:none;margin:0;padding:3px 9px;cursor:pointer;border:1px solid var(--line-2);
-  background:rgba(255,255,255,.04);color:var(--ink);border-radius:6px;font-family:"IBM Plex Mono";font-size:9.5px}
+  background:rgba(255,255,255,.04);color:var(--ink);border-radius:6px;font-family:"IBM Plex Mono";font-size:9.5px;font-weight:500}
 .sat-speed-row button.on{border-color:var(--aqua);color:var(--aqua)}
 .sat-empty{font-family:"IBM Plex Mono";font-size:11px;font-weight:500;line-height:1.5;color:var(--ink);padding:3px 0 5px}
 #skewtModal{position:absolute;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;
@@ -191,7 +191,7 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
 #pointCard .row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink);padding:2px 0}
 #pointCard .row b{color:var(--ink);font-family:"IBM Plex Mono";font-weight:500}
 .clr{margin-top:8px;width:100%;cursor:pointer;border:1px solid var(--line-2);background:rgba(255,255,255,.04);
-  color:var(--ink);border-radius:6px;font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.06em;padding:5px 0}
+  color:var(--ink);border-radius:6px;font-family:"IBM Plex Mono";font-size:9.5px;font-weight:500;letter-spacing:.06em;padding:5px 0}
 .clr:hover{border-color:var(--aqua);color:var(--aqua)}
 #ptLoading{position:absolute;z-index:1500;background:rgba(13,28,41,.92);border:1px solid var(--line-2);border-radius:20px;
   padding:5px 12px;font-family:"IBM Plex Mono";font-size:10px;color:var(--aqua);letter-spacing:.06em;
@@ -717,7 +717,7 @@ let nexradAnim = null; // {timer, idx, frames, speedMs, productKey, targetLayerG
 function nexradAnimStop(){
   if(!nexradAnim) return;
   clearInterval(nexradAnim.timer);
-  nexradAnim.frames.forEach(f=>f.layers.forEach(lyr=>nexradAnim.targetLayerGroup.removeLayer(lyr)));
+  nexradAnim.frames.forEach(f=>{ if(f.layers) f.layers.forEach(lyr=>nexradAnim.targetLayerGroup.removeLayer(lyr)); });
   nexradAnim.checkbox.checked = false;
   const btn = document.getElementById('nexradAnimBtn');
   const timeLabel = document.getElementById('nexradAnimTime');
@@ -735,23 +735,44 @@ function nexradAnimToggle(stations, targetLayerGroup, productState){
   product.layers = [];
   const n = 12, stepMin = 5; // last ~55 min, snapped to each station's real nearest scan
   const now = Date.now();
+  // Frames build their tile layers LAZILY, the first time playback reaches
+  // that index, then stay cached for the rest of the session -- building
+  // all 12 up front was issuing every station's full WMS tile grid for
+  // every frame simultaneously (measured live: ~545ms/131KB per single
+  // 512px tile, and a real query here needs ~15 tiles/station at typical
+  // zoom -- 12 frames x 2 stations x 15 tiles is ~360 real requests to
+  // NOAA's WMS fired all at once), which is what was freezing the tab on
+  // every animation start. GOES's animation doesn't hit this because each
+  // of its frames is one single pre-rendered global tile, not a per-station
+  // tile grid -- there was nothing to fix there.
   const frames = [];
   for(let i=n-1; i>=0; i--){
-    const t = new Date(now - i*stepMin*60000).toISOString();
-    const layers = stations.map(s=>{
-      const lyr = makeNexradWmsLayer(s, productKey);
-      lyr.wmsParams.time = t;
-      lyr.setParams({time: t});
-      lyr.setOpacity(0);
-      lyr.addTo(targetLayerGroup);
-      return lyr;
-    });
-    frames.push({t, layers});
+    frames.push({t: new Date(now - i*stepMin*60000).toISOString(), layers: null});
+  }
+  let shownIdx = null;
+  function showNexradFrame(i){
+    const f = frames[i];
+    if(!f.layers){
+      f.layers = stations.map(s=>{
+        const lyr = makeNexradWmsLayer(s, productKey);
+        lyr.wmsParams.time = f.t;
+        lyr.setParams({time: f.t});
+        lyr.setOpacity(0.95);
+        lyr.addTo(targetLayerGroup);
+        return lyr;
+      });
+    } else {
+      f.layers.forEach(lyr=>lyr.setOpacity(0.95));
+    }
+    if(shownIdx!==null && shownIdx!==i && frames[shownIdx].layers){
+      frames[shownIdx].layers.forEach(lyr=>lyr.setOpacity(0));
+    }
+    shownIdx = i;
   }
   product.checkbox.checked = true;
   nexradAnim = {frames, targetLayerGroup, speedMs:600, idx:0, timer:null, productKey, checkbox:product.checkbox};
   nexradAnim.tick = ()=>{
-    frames.forEach((f,i)=>f.layers.forEach(lyr=>lyr.setOpacity(i===nexradAnim.idx?0.95:0)));
+    showNexradFrame(nexradAnim.idx);
     const d = new Date(frames[nexradAnim.idx].t);
     timeLabel.textContent = String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+'Z';
     nexradAnim.idx = (nexradAnim.idx+1)%frames.length;
