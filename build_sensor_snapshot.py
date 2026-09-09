@@ -4,9 +4,11 @@ Builds a real-time sensor snapshot around a point: every ASOS/RWIS/DCP
 wind-instrumented station within radius_km (live current observations, not
 just registry metadata), every wind-instrumented SNOTEL/SNOTEL-Lite station,
 and the nearest radiosonde sites' latest soundings (CONUS via the fast
-forecast.weather.gov MAN product, falling back to NOAA/NCEI's global IGRA
-archive everywhere that doesn't cover -- see recorder/igra.py for the real
-latency tradeoff that fallback carries).
+forecast.weather.gov MAN product; Alaska/Hawaii via SPC's live text sounding
+feed, see recorder/spc_sounding.py; NOAA/NCEI's global IGRA archive as the
+last-resort fallback everywhere neither of those covers -- see
+recorder/igra.py for the real ~1-2 day latency tradeoff that fallback
+carries).
 
 sensors_around_point() is the reusable core (used by both this script's
 per-fire builds and api_server.py's click-anywhere point queries). build_snapshot()
@@ -39,6 +41,7 @@ from radiosonde_stations import RADIOSONDE_STATIONS
 from perimeter import fetch_perimeter
 from snotel import fetch_wind_stations, fetch_latest_wind
 import igra
+import spc_sounding
 import iteris_rwis
 import viirs_fire
 import firms_active_fire
@@ -120,6 +123,46 @@ def _igra_full_profile(sounding):
             "wind_dir": lv.get("wind_dir"), "wind_kt": _mps_to_kt(lv.get("wind_mps")),
         })
     return levels
+
+
+def _spc_full_profile(levels):
+    """levels: recorder/spc_sounding.py's parsed, file-ordered level list.
+    Real surface + real height at every mandatory level (unlike the CONUS
+    TTAA decode, which only knows height at 850/700 hPa) -- but the file
+    reports far more raw levels than the mandatory set this project's other
+    two sources show (150+ vs ~11), so this thins to the same mandatory-hPa
+    table shape as _conus_full_profile/_igra_full_profile rather than
+    dumping every level. The real surface pressure is often below the
+    nominal 1000/925 mandatory rows for an elevated station (those come
+    back all-missing, not omitted, when they're below ground) -- so surface
+    is taken as the first level with any real temp/wind, not assumed to be
+    1000 hPa."""
+    def r1(v):
+        return round(v, 1) if v is not None else None
+    real = [lv for lv in levels if lv.get("temp_c") is not None or lv.get("wind_kt") is not None]
+    if not real:
+        return []
+    surf = real[0]
+    out = [{
+        "label": "Surface", "pressure_hpa": round(surf["pressure_hpa"]),
+        "height_m": round(surf["height_m"]) if surf.get("height_m") is not None else None,
+        "temp_c": r1(surf.get("temp_c")), "dewpt_c": r1(surf.get("dewpt_c")),
+        "wind_dir": surf.get("wind_dir"), "wind_kt": r1(surf.get("wind_kt")),
+    }]
+    for hpa in drift_track.MANDATORY_HPA:
+        if hpa >= surf["pressure_hpa"]:
+            continue
+        candidates = [lv for lv in real if abs(lv["pressure_hpa"] - hpa) <= 15]
+        if not candidates:
+            continue
+        lvl = min(candidates, key=lambda lv: abs(lv["pressure_hpa"] - hpa))
+        out.append({
+            "label": f"{hpa} hPa", "pressure_hpa": hpa,
+            "height_m": round(lvl["height_m"]) if lvl.get("height_m") is not None else None,
+            "temp_c": r1(lvl.get("temp_c")), "dewpt_c": r1(lvl.get("dewpt_c")),
+            "wind_dir": lvl.get("wind_dir"), "wind_kt": r1(lvl.get("wind_kt")),
+        })
+    return out
 
 
 def _fetch_one_network(net):
@@ -293,9 +336,11 @@ def _fetch_active_fire(lat, lon, radius_km, region):
 
 
 def _fetch_one_sounding(site):
-    """CONUS-fast path (balloons.py / forecast.weather.gov) first; falls back
-    to IGRA (global, but ~1-2 day latency -- see igra.py's module docstring)
-    only when the fast path fails. Runs fully independently per site so the
+    """CONUS-fast path (balloons.py / forecast.weather.gov) first; for the 15
+    Alaska/Hawaii sites it can't reach, tries SPC's live text sounding feed
+    (recorder/spc_sounding.py) next; falls back to IGRA (global, but ~1-2 day
+    latency -- see igra.py's module docstring) only when neither near-
+    immediate source has data. Runs fully independently per site so the
     caller can fan multiple sites out concurrently."""
     entry = {
         "site": site["site"], "name": site["name"],
@@ -331,6 +376,39 @@ def _fetch_one_sounding(site):
                 entry["drift_basis"] = "estimated_standard_atmosphere_ascent_rate"
     except Exception as e:
         entry["status"] = f"NWS MAN product failed: {e}"
+
+    if entry["status"] == "ok":
+        return entry
+
+    if site["site"] in spc_sounding.AK_HI_ICAO:
+        try:
+            spc = spc_sounding.fetch_latest(site["site"])
+            profile = _spc_full_profile(spc["levels"])
+            surf = profile[0] if profile and profile[0]["label"] == "Surface" else None
+            lvl700 = next((p for p in profile if p["pressure_hpa"] == 700), None)
+            if (surf and surf.get("wind_kt") is not None) or (lvl700 and lvl700.get("wind_kt") is not None):
+                entry["status"] = "ok"
+                entry["source"] = f"SPC live sounding ({spc['icao']}, Alaska/Hawaii, near-immediate)"
+                entry["valid_note"] = f"{spc['year']}-{spc['month']:02d}-{spc['day']:02d} {spc['hour']:02d}{spc['minute']:02d}Z"
+                entry["launch_utc"] = spc["valid_utc"]
+                if surf and surf.get("wind_kt") is not None:
+                    entry["surface_wind_mph"] = _kt_to_mph(surf["wind_kt"])
+                    entry["surface_wind_dir"] = surf.get("wind_dir")
+                if lvl700 and lvl700.get("wind_kt") is not None:
+                    entry["level700_wind_mph"] = _kt_to_mph(lvl700["wind_kt"])
+                    entry["level700_wind_dir"] = lvl700.get("wind_dir")
+                entry["levels"] = profile
+                # Real height at every level here (unlike the CONUS path's
+                # 850/700-only heights), so only elapsed time is an
+                # assumption -- still one stacked assumption, so tagged
+                # distinctly from IGRA's real-time-and-height basis below.
+                reckon_in = drift_track.conus_reckon_input(entry["levels"])
+                track = drift_track.dead_reckon(reckon_in, site["lat"], site["lon"])
+                if track:
+                    entry["drift_track"] = track
+                    entry["drift_basis"] = "estimated_ascent_rate_real_height"
+        except Exception as e:
+            entry["status"] = entry["status"] + f"; SPC sounding also failed: {e}"
 
     if entry["status"] == "ok":
         return entry

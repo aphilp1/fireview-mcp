@@ -931,9 +931,16 @@ function renderSoundingPanel(soundings, distLabel, trackCount){
     list.appendChild(line);
   });
 }
+function soundingSourceLabel(sd){
+  const src = sd.source||'';
+  if(src.startsWith('IGRA')) return 'IGRA · ~1-2 day lag';
+  if(src.startsWith('SPC')) return 'SPC (Alaska/Hawaii) · near-immediate';
+  return 'CONUS · near-immediate';
+}
 function driftBasisLabel(basis){
   if(basis==='estimated_real_time_and_height') return 'Estimated flight path — real elapsed time & height, modeled position (not GPS)';
   if(basis==='estimated_standard_atmosphere_ascent_rate') return 'Estimated flight path — standard-atmosphere height + assumed ascent rate, modeled position (not GPS)';
+  if(basis==='estimated_ascent_rate_real_height') return 'Estimated flight path — real reported height, assumed ascent rate for timing, modeled position (not GPS)';
   return 'Estimated flight path — not GPS-observed';
 }
 function trackPointObservedTime(sd, pt){
@@ -962,7 +969,7 @@ function trackPointPopupHtml(sd, pt, distLabel){
   // identity + timing that used to live in the sidebar list -- moved here
   // per the user's ask, so it's all reachable from the track itself.
   const identityBlock = isLaunch ?
-    '<div class="pc">'+sd.dist_mi+' mi from '+distLabel+' · '+((sd.source||'').startsWith('IGRA')?'IGRA · ~1-2 day lag':'CONUS · near-immediate')+'</div>'+
+    '<div class="pc">'+sd.dist_mi+' mi from '+distLabel+' · '+soundingSourceLabel(sd)+'</div>'+
     '<div class="row"><span>Launch</span><b>'+launchTimeText(sd)+'</b></div>'
     : '';
   const timeText = trackPointObservedTime(sd, pt);
