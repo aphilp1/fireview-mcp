@@ -46,11 +46,40 @@ click-to-query so panning doesn't trigger repeat queries.
    fallback via IGRA.
 3. **Active Fire Detections** — VIIRS (375m) and MODIS (1km) active-fire
    hotspots from NASA FIRMS, always shown even at a real zero.
-4. **Satellite** — GOES-East/West GeoColor + Infrared (auto-selected by
-   longitude) with a real animated loop; MODIS Terra/Aqua daily true-color
-   imagery; Landsat 8 & 9 scenes covering the full search radius; NEXRAD
-   station reflectivity/velocity as toggleable animated WMS layers; real
-   MODIS/VIIRS orbital ground tracks propagated from live TLE data.
+4. **Satellite** — GOES-East/West GeoColor (true color) + Infrared imagery,
+   real MODIS/VIIRS orbital ground tracks; see below for detail. Also:
+   MODIS Terra/Aqua daily true-color imagery; Landsat 8 & 9 scenes covering
+   the full search radius; NEXRAD station reflectivity/velocity as
+   toggleable animated WMS layers.
+
+### GOES GeoColor + Infrared
+
+Two independently-toggleable satellite layers, both from NASA GIBS's public
+WMTS service (no API key):
+
+- **GeoColor (true color)** — `ABI_GeoColor`, GOES's natural-color composite.
+- **Infrared (Band 13, day+night)** — `ABI_Band13_Clean_Infrared`, cloud-top
+  temperature; useful after dark or through smoke haze when GeoColor goes
+  dark.
+
+**GOES-East vs GOES-West is chosen automatically** by the queried point's
+longitude (split at -105°) — whichever satellite actually has useful
+coverage there, not a user toggle. Tiles render in a dedicated Leaflet pane
+(`goesPane`, z-index 350) specifically so the dashboard's dark-mode CSS
+filter (applied to the base OSM tile pane) doesn't invert their real colors.
+
+**Animation** — the ▶ Animate control (¼×–2× speed) works on whichever of
+the two products is currently checked. It probes the last ~14 GIBS 10-minute
+time steps with a single lightweight test-tile fetch each (GIBS steps are
+often missing), keeps only the ones that actually returned imagery, and
+cycles those. The checkbox for the animating product stays checked and
+enabled throughout — unchecking it (or hitting Stop) always cleanly tears
+the animation down, no disabled/stuck states.
+
+Verified live 2026-09-09 against a real CONUS point: real natural-color
+GeoColor imagery (correct terrain/cloud/ocean colors, no inversion), real
+IR cloud-top imagery showing genuine convection, a full animate → stop
+cycle with the checkbox state correct throughout, and zero console errors.
 
 **Fire perimeter** — the real WFIGS-mapped polygon when available.
 
@@ -62,12 +91,15 @@ click-to-query so panning doesn't trigger repeat queries.
 - `api_server.py` — a small `ThreadingHTTPServer`, CORS + no-cache,
   `/api/fire`, `/api/point`, `/api/tle`.
 - `recorder/` — one module per real data source (WFIGS, IEM Mesonet, NRCS
-  AWDB, NWS/IGRA soundings, Iteris state DOT cameras, NASA FIRMS, CelesTrak).
+  AWDB, NWS/SPC/IGRA soundings, Iteris state DOT cameras, NASA FIRMS,
+  CelesTrak).
 
 ## Known gaps
 
-- Radiosonde soundings: Alaska/Hawaii/territories fall back to IGRA
-  (~1–2 day lag) — no confirmed fast path there yet.
+- Radiosonde soundings: CONUS uses NWS's near-immediate `product.php`;
+  Alaska/Hawaii use SPC's near-immediate live text-sounding feed (see
+  `recorder/spc_sounding.py`); everywhere else (territories) still falls
+  back to IGRA (~1–2 day lag).
 - State DOT cameras: only Montana and South Dakota share the Iteris
   platform this integrates against; Georgia, Kansas, and West Virginia do
   not and would need separate integrations.

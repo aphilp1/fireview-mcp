@@ -1,4 +1,4 @@
-# FireView — Status (as of 2026-09-05)
+# FireView — Status (as of 2026-09-09)
 
 FireView is a single, live, national fire-weather sensor dashboard. Search
 any active US fire by name, or click anywhere on the map, and it pulls the
@@ -75,9 +75,12 @@ groups:
    territories) and MODIS Active Fire (1km, Terra + Aqua, same FIRMS
    feeds, no territory fallback). Both are a rolling 24h window (a
    property of the real source).
-4. **Satellite** — GOES-East/West GeoColor + Infrared (Band 13,
+4. **Satellite** — GOES-East/West GeoColor (true color) + Infrared (Band 13,
    day+night), auto-selected by longitude, NASA GIBS WMTS, rendered in a
    dedicated Leaflet pane to escape the basemap's dark-mode CSS filter.
+   **Re-verified stable 2026-09-09** (real GeoColor + IR imagery, full
+   animate/stop cycle, zero console errors) at the user's request — no code
+   changes made, this was a stability check only.
    Includes a real animated loop (▶ Animate, ¼×–2× speed) for whichever
    product's checkbox is checked, built by probing ~14 recent 10-minute
    GIBS time steps and cycling only the ones that actually have imagery;
@@ -120,8 +123,10 @@ glyph fallback only when WFIGS hasn't mapped that incident yet.
 
 ## Known gaps (real, documented, not silently papered over)
 
-- Radiosonde soundings: Alaska/Hawaii/territories have no confirmed working
-  fetch via the CONUS MAN-product path — falls back to IGRA (~1–2 day lag).
+- Radiosonde soundings: Alaska/Hawaii have no working fetch via the CONUS
+  MAN-product path, but are covered near-immediately by SPC's live text
+  sounding feed instead (`recorder/spc_sounding.py`, added 2026-09-09).
+  Territories still have no fast path and fall back to IGRA (~1–2 day lag).
 - State DOT cameras: Georgia, Kansas, West Virginia confirmed NOT to share
   Montana/South Dakota's Iteris platform — separate integrations needed.
 - MODIS active-fire: no territory fallback (no verified global keyless
@@ -152,5 +157,6 @@ glyph fallback only when WFIGS hasn't mapped that incident yet.
   full `--slate`/`--mute` → `--ink` contrast sweep across the whole
   dashboard (not just the previously-reported spots).
 
-Not a git repository — no `.git` here, nothing to push. This file plus the
-zip backups are the durable record of state.
+Public repo live since 2026-09-07: https://github.com/aphilp1/fireview-mcp
+(MIT license). This file is kept as a more detailed internal companion to
+the repo's `README.md`, not a substitute for it.
