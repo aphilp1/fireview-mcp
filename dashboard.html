@@ -17,6 +17,7 @@
   --aqua:#46cfd6; --amber:#ff8a3d; --amber-soft:#ffb27a; --coral:#ff5d6c;
   --calm:#46cfd6; --mod:#ffcf5c; --high:#ff8a3d; --extreme:#ff5d6c;
   --violet:#b98cf0; --lime:#9fe66d; --gold:#ffcf5c; --sky:#5b9dd9;
+  --flame:#ff6a1a; --teal:#2dd4bf;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--abyss);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-weight:300}
@@ -53,6 +54,14 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
    standard keyless tileset into a dark map without depending on a paid/keyed
    provider (same CSS-filter trick RapidWatch used on Esri Ocean tiles). */
 .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.92) saturate(0.7)}
+/* Hillshade escapes the invert filter above on purpose (inverting it flips
+   which slopes read as sun-facing vs shadowed -- a real, previously-fixed
+   bug), but that leaves its true Esri tones -- a naturally light gray/white
+   palette on sun-exposed terrain -- clashing hard with this app's otherwise
+   dark theme. A pure brightness/contrast reduction (no invert, no
+   hue-rotate) darkens it to match without touching the actual relief
+   direction. */
+.leaflet-realTerrain-pane{filter:brightness(.68) contrast(1.05) saturate(.9)}
 .leaflet-control-zoom a{background:var(--panel)!important;color:var(--aqua)!important;border-color:var(--line)!important}
 .leaflet-control-zoom a:hover{background:var(--deep)!important}
 .rw-north{background:rgba(13,28,41,.85);border:1px solid var(--line);border-radius:8px;
@@ -114,6 +123,15 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
 #legend h3 .sq{width:8px;height:8px;border-radius:2px;background:var(--amber)}
 #nexradLegendPanel h3{font-family:"Space Grotesk";font-weight:600;font-size:11px;letter-spacing:.04em;margin:0 0 8px;color:var(--ink);display:flex;align-items:center;gap:8px;cursor:move;user-select:none}
 #nexradLegendPanel h3 .sq{width:8px;height:8px;border-radius:2px}
+#trendsPanel h3{font-family:"Space Grotesk";font-weight:600;font-size:11px;letter-spacing:.04em;margin:0 0 8px;color:var(--ink);display:flex;align-items:center;gap:8px;cursor:move;user-select:none}
+#trendsPanel h3 .sq{width:8px;height:8px;border-radius:2px}
+#trendsClose:hover{color:var(--ink)}
+.trend-chart{margin-bottom:14px}
+.trend-chart-title{font-family:"IBM Plex Mono";font-size:10px;letter-spacing:.06em;color:var(--slate);margin-bottom:4px;text-transform:uppercase}
+.trend-chart svg{width:100%;height:90px;display:block}
+.trend-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:3px}
+.trend-legend span{display:inline-flex;align-items:center;gap:4px;font-family:"IBM Plex Mono";font-size:9.5px;color:var(--slate)}
+.trend-legend .sw{width:9px;height:9px;border-radius:2px;display:inline-block}
 .nexrad-legend-sub{margin-bottom:8px}
 .nexrad-legend-sub:last-child{margin-bottom:0}
 .nexrad-legend-label{font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink);opacity:.75;margin-bottom:4px}
@@ -211,13 +229,14 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
 #ptLoading{position:absolute;z-index:1500;background:rgba(13,28,41,.92);border:1px solid var(--line-2);border-radius:20px;
   padding:5px 12px;font-family:"IBM Plex Mono";font-size:10px;color:var(--aqua);letter-spacing:.06em;
   pointer-events:none;transform:translate(-50%,-140%);white-space:nowrap}
-#fireSearch{display:flex;align-items:center;gap:0;margin-left:6px}
+#fireSearch{display:flex;align-items:stretch;gap:0;margin-left:6px}
 #fireSearchInput{background:rgba(255,255,255,.04);border:1px solid var(--line-2);border-right:none;border-radius:7px 0 0 7px;
   color:var(--ink);font-family:"IBM Plex Sans";font-size:12px;padding:6px 10px;width:230px;outline:none}
 #fireSearchInput::placeholder{color:var(--mute)}
 #fireSearchInput:focus{border-color:var(--aqua)}
 #fireSearchBtn{background:rgba(70,207,214,.12);border:1px solid var(--line-2);border-left:none;border-radius:0 7px 7px 0;
-  color:var(--aqua);font-family:"IBM Plex Mono";font-size:10.5px;font-weight:600;letter-spacing:.06em;padding:6px 12px;cursor:pointer}
+  color:var(--aqua);font-family:"IBM Plex Mono";font-size:10.5px;font-weight:600;letter-spacing:.06em;padding:6px 12px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
 #fireSearchBtn:hover{background:rgba(70,207,214,.22)}
 #searchErr{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2100;font-size:11px;color:var(--coral);
   font-family:"IBM Plex Mono";background:rgba(13,28,41,.92);border:1px solid var(--line-2);border-radius:6px;padding:4px 10px;display:none}
@@ -260,6 +279,7 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
         <div class="panel-body">
         <div class="layerGroupLabel">Ground Sensors</div>
         <div id="netLayers"></div>
+        <button id="trendsBtn" class="clr" style="margin:2px 0 6px" disabled>📈 View Trends</button>
         <div class="layerGroupLabel">Radiosonde Soundings</div>
         <div id="sondeList"></div>
         <div class="layerGroupLabel">Active Fire Detections</div>
@@ -285,6 +305,30 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
         </div>
       </div>
     </div>
+    <div class="panel" id="trendsPanel" style="display:none;top:70px;left:340px;width:520px;max-height:80vh;padding:10px 14px;overflow-y:auto">
+      <h3><span class="sq" style="background:var(--lime)"></span><span class="panel-title-text">GROUND SENSOR TRENDS</span><span id="trendsClose" style="margin-left:auto;cursor:pointer;padding:0 4px">✕</span></h3>
+      <div class="panel-body">
+        <div id="trendsExplain" style="font-size:10.5px;color:var(--slate);line-height:1.5;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+          Each line is a real <b style="color:var(--ink)">area average</b> across every currently-reporting station of that
+          sensor type within the 75mi radius — not one representative station. A timestamp where only some stations
+          reported still shows the average of just those; a timestamp with no real reports from any station is left as a
+          real gap in the line, never interpolated or estimated.
+          <br><br>
+          <b style="color:var(--ink)">6h/24h</b> windows are hourly bins from each network's raw observations.
+          <b style="color:var(--ink)">15d/30d</b> windows are daily bins; for Airport/Road Weather/Remote Sensor (IEM),
+          the daily temp/RH value is the midpoint of that real day's recorded min/max (IEM's daily archive has no
+          separate daily-average field) — wind/gust at that granularity are IEM's own real daily average/max.
+          <br><br>
+          <b style="color:var(--flame)">RAWS is not shown here</b> — no real, keyless historical archive for it was found
+          (WRCC's own system requires a password beyond ~90 days; NOAA's weather.gov timeseries tool works but only via
+          spoofing a Synoptic API key meant for weather.gov's own use, which was explicitly ruled out). RAWS still shows
+          full live current conditions, including fuel moisture, on the map itself.
+        </div>
+        <div id="trendsWindowRow" class="sat-speed-row"></div>
+        <div id="trendsStatus" style="font-family:'IBM Plex Mono';font-size:10px;color:var(--slate);margin:4px 0 8px">—</div>
+        <div id="trendsCharts"></div>
+      </div>
+    </div>
     <div id="err" class="panel" style="display:none"></div>
     <div id="empty">
       <div class="ek">FIREVIEW</div>
@@ -308,10 +352,11 @@ const API_BASE = 'http://127.0.0.1:8940';
 // than instantaneous wind band, and severity is still readable per-marker
 // via its popup. Marker SIZE still scales with wind magnitude (a real,
 // separate signal), just not color.
-const FAMILY_COLORS = { ASOS: '--aqua', RWIS: '--amber', DCP: '--violet', SNTL: '--lime', SNTLT: '--lime', MDTCAM: '--gold', VIIRS: '--coral', MODIS: '--amber-soft', NEXRAD: '--sky' };
+const FAMILY_COLORS = { ASOS: '--aqua', RWIS: '--amber', DCP: '--violet', SNTL: '--lime', SNTLT: '--lime', MDTCAM: '--gold', VIIRS: '--coral', MODIS: '--amber-soft', NEXRAD: '--sky', RAWS: '--flame', MTMESO: '--teal' };
 const FAMILY_LABELS = { ASOS: 'Airport (ASOS)', RWIS: 'Road Weather (RWIS)', DCP: 'Remote Sensor (DCP)',
   SNTL: 'SNOTEL — Ridge Wind', SNTLT: 'SNOTEL Lite — Ridge Wind', MDTCAM: 'State DOT Road Cameras',
-  VIIRS: 'VIIRS Active Fire (375m)', MODIS: 'MODIS Active Fire (1km)', NEXRAD: 'NEXRAD Stations' };
+  VIIRS: 'VIIRS Active Fire (375m)', MODIS: 'MODIS Active Fire (1km)', NEXRAD: 'NEXRAD Stations',
+  RAWS: 'RAWS (fire weather)', MTMESO: 'Montana Mesonet' };
 function familyColor(fam){ return getVar(FAMILY_COLORS[fam] || '--slate'); }
 function familyLabel(fam){ return FAMILY_LABELS[fam] || fam; }
 // Network codes are state-prefixed (MT_ASOS, AK_ASOS, ID_RWIS, ...) because
@@ -477,6 +522,222 @@ setQueryArmed(true);
   h3.addEventListener('pointerup', ()=>{ dragging = false; });
 })();
 
+// ---- GROUND SENSOR TRENDS panel: real historical combined-per-network
+// trends (wind/gust/temp/RH) at 4 windows, fetched on demand from
+// /api/trends -- see recorder/trends.py for the real per-network data
+// sources and the RAWS-excluded/IEM-capped scope decisions. Draggable by
+// its header + closeable, same convention as the two panels above. ----
+const TRENDS_WINDOWS = ['6h','24h','15d','30d'];
+const TRENDS_VARS = [
+  {key:'wind_mph', label:'Wind (mph)'}, {key:'gust_mph', label:'Gust (mph)'},
+  {key:'temp_f', label:'Temp (°F)'}, {key:'relh_pct', label:'RH (%)'},
+];
+// Only networks recorder/trends.py has a real historical source for --
+// RAWS/MDTCAM/NEXRAD/etc. are silently excluded from the payload, not
+// sent and errored on.
+function trendsSupportedFamily(network){
+  const fam = networkFamily(network);
+  return fam==='ASOS' || fam==='RWIS' || fam==='DCP' || fam==='MTMESO';
+}
+let trendsWindow = '24h';
+let trendsAbortToken = 0;
+let trendsCache = null; // the last /api/trends response -- already covers
+  // all 4 windows in one fetch, so switching windows re-renders from this
+  // instead of re-hitting IEM/SNOTEL/Montana Mesonet every click. Cleared
+  // whenever a new fire/point query lands (see renderStationLayers).
+
+function refreshTrendsAvailability(){
+  const hasGround = lastStations.some(s=>trendsSupportedFamily(s.network)) || lastSnotel.length>0;
+  document.getElementById('trendsBtn').disabled = !hasGround;
+}
+
+function buildTrendsNetworksPayload(){
+  const networks = {};
+  lastStations.forEach(s=>{
+    if(!trendsSupportedFamily(s.network)) return;
+    (networks[s.network] = networks[s.network] || []).push(s.id);
+  });
+  if(lastSnotel.length){
+    networks['SNTL'] = lastSnotel.map(s=>s.id);
+  }
+  return networks;
+}
+
+// 6h/24h are hourly-real, so a clock time is what matters; 15d/30d are
+// daily-real, so a calendar date reads better than a time-of-day.
+function trendTimeLabel(t){
+  const d = new Date(t);
+  if(trendsWindow==='6h' || trendsWindow==='24h'){
+    return String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+'Z';
+  }
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+}
+
+function trendChartSvg(seriesByNetwork, unit){
+  const W = 480, H = 104, padL = 30, padR = 6, padT = 6, padB = 30;
+  const allPoints = Object.values(seriesByNetwork).flat();
+  if(!allPoints.length) return '<div style="font-size:10px;color:var(--mute);padding:6px 0">No data in this window</div>';
+  const ts = allPoints.map(p=>new Date(p.t).getTime());
+  const vs = allPoints.map(p=>p.value);
+  const tMin = Math.min(...ts), tMax = Math.max(...ts);
+  let vMin = Math.min(...vs), vMax = Math.max(...vs);
+  if(vMin===vMax){ vMin -= 1; vMax += 1; }
+  const vPad = (vMax-vMin)*0.08;
+  vMin -= vPad; vMax += vPad;
+  const x = t => padL + (tMax>tMin ? (t-tMin)/(tMax-tMin) : 0.5) * (W-padL-padR);
+  const y = v => padT + (1 - (v-vMin)/(vMax-vMin)) * (H-padT-padB);
+  let svg = '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">';
+  // gridlines + axis labels (min/max only, keeps it uncluttered)
+  svg += '<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(H-padB)+'" stroke="var(--line)" stroke-width="1"/>';
+  svg += '<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="var(--line)" stroke-width="1"/>';
+  svg += '<text x="2" y="'+(y(vMax)+3)+'" font-size="8" fill="var(--mute)">'+vMax.toFixed(0)+'</text>';
+  svg += '<text x="2" y="'+(y(vMin)+3)+'" font-size="8" fill="var(--mute)">'+vMin.toFixed(0)+'</text>';
+  // x-axis: start/mid/end real timestamps from the actual data, not an
+  // assumed window boundary -- a real gap at either end (e.g. SNOTEL's
+  // telemetry lag) means the true data span is narrower than the nominal
+  // window, and the labels should say so, not imply data that isn't there.
+  const tMid = tMin + (tMax-tMin)/2;
+  [[tMin,'start'],[tMid,'middle'],[tMax,'end']].forEach(([t,anchor])=>{
+    const anchorAttr = anchor==='start' ? 'start' : anchor==='end' ? 'end' : 'middle';
+    svg += '<text x="'+x(t).toFixed(1)+'" y="'+(H-padB+11)+'" font-size="8" fill="var(--mute)" text-anchor="'+anchorAttr+'">'+trendTimeLabel(t)+'</text>';
+  });
+  Object.entries(seriesByNetwork).forEach(([net, pts])=>{
+    if(!pts.length) return;
+    const color = familyColor(networkFamily(net));
+    const d = pts.map((p,i)=>(i===0?'M':'L')+x(new Date(p.t).getTime()).toFixed(1)+','+y(p.value).toFixed(1)).join(' ');
+    svg += '<path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.6"/>';
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+// Backend networks are IEM's real per-state codes (MT_ASOS, ID_ASOS, ...)
+// because IEM's fetch needs that exact code per station -- but a fire
+// query spanning state lines would otherwise show "Airport (ASOS)" twice
+// in the legend with no way to tell the lines apart. Re-combine here by
+// FAMILY (sensor type, state-agnostic) for display, matching the actual
+// "one line per network type" scope decision -- exact-timestamp average
+// across whichever raw networks share a family, same real-average-of-
+// real-values approach as the backend's own combine step.
+function mergeByFamily(data, varKey){
+  const byTimestamp = {};
+  const families = new Set();
+  Object.keys(data).forEach(net=>{
+    const fam = networkFamily(net);
+    families.add(fam);
+    const pts = (data[net][trendsWindow] && data[net][trendsWindow][varKey]) || [];
+    pts.forEach(p=>{
+      const key = fam+'|'+p.t;
+      (byTimestamp[key] = byTimestamp[key] || {fam, t:p.t, vals:[]}).vals.push(p.value);
+    });
+  });
+  const seriesByFamily = {};
+  families.forEach(f=>seriesByFamily[f]=[]);
+  Object.values(byTimestamp).forEach(({fam,t,vals})=>{
+    seriesByFamily[fam].push({t, value: vals.reduce((a,b)=>a+b,0)/vals.length});
+  });
+  Object.values(seriesByFamily).forEach(arr=>arr.sort((a,b)=>a.t.localeCompare(b.t)));
+  return seriesByFamily;
+}
+
+function renderTrendCharts(data){
+  const el = document.getElementById('trendsCharts');
+  const networks = Object.keys(data);
+  if(!networks.length){ el.innerHTML = '<div style="font-size:11px;color:var(--mute)">No supported ground-sensor networks in this query.</div>'; return; }
+  let html = '';
+  TRENDS_VARS.forEach(v=>{
+    const seriesByFamily = mergeByFamily(data, v.key);
+    const legend = Object.keys(seriesByFamily).filter(f=>seriesByFamily[f].length).map(f=>
+      '<span><span class="sw" style="background:'+familyColor(f)+'"></span>'+familyLabel(f)+'</span>'
+    ).join('');
+    html += '<div class="trend-chart"><div class="trend-chart-title">'+v.label+'</div>'+
+      trendChartSvg(seriesByFamily, v.key)+
+      (legend?'<div class="trend-legend">'+legend+'</div>':'')+
+      '</div>';
+  });
+  el.innerHTML = html;
+}
+
+async function ensureTrendsData(){
+  if(trendsCache) return trendsCache;
+  const statusEl = document.getElementById('trendsStatus');
+  const networks = buildTrendsNetworksPayload();
+  if(!Object.keys(networks).length){
+    statusEl.textContent = 'No supported ground-sensor networks in this query.';
+    document.getElementById('trendsCharts').innerHTML = '';
+    return null;
+  }
+  const myToken = ++trendsAbortToken;
+  statusEl.textContent = 'Fetching real historical data… (IEM networks are ~15s/network — this is the only fetch; switching 6h/24h/15d/30d after this is instant, re-fetched only on your next search/query)';
+  try{
+    const r = await fetch(API_BASE+'/api/trends', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({networks}),
+    });
+    if(myToken !== trendsAbortToken) return null; // a newer request superseded this one
+    if(!r.ok){ statusEl.textContent = 'Trends fetch failed: HTTP '+r.status; return null; }
+    const data = await r.json();
+    if(myToken !== trendsAbortToken) return null;
+    trendsCache = data;
+    statusEl.textContent = 'Loaded '+new Date().toLocaleTimeString()+' — cached until your next search/query.';
+    return data;
+  }catch(e){
+    if(myToken !== trendsAbortToken) return null;
+    statusEl.textContent = 'Trends fetch failed: '+e.message;
+    return null;
+  }
+}
+
+async function fetchAndRenderTrends(){
+  const data = await ensureTrendsData();
+  if(data) renderTrendCharts(data);
+}
+
+(function setupTrendsPanel(){
+  const panel = document.getElementById('trendsPanel');
+  const h3 = panel.querySelector('h3');
+  const windowRow = document.getElementById('trendsWindowRow');
+  TRENDS_WINDOWS.forEach(w=>{
+    const b = document.createElement('button');
+    b.textContent = w; if(w===trendsWindow) b.classList.add('on');
+    b.addEventListener('click', ()=>{
+      trendsWindow = w;
+      [...windowRow.children].forEach(c=>c.classList.remove('on'));
+      b.classList.add('on');
+      // The cached response already has all 4 windows -- re-render only,
+      // no re-fetch. fetchAndRenderTrends() is still safe to call as a
+      // fallback (e.g. panel opened directly to a non-default window
+      // somehow) since ensureTrendsData() itself no-ops when cached.
+      fetchAndRenderTrends();
+    });
+    windowRow.appendChild(b);
+  });
+  document.getElementById('trendsBtn').addEventListener('click', ()=>{
+    panel.style.display = 'block';
+    fetchAndRenderTrends();
+  });
+  document.getElementById('trendsClose').addEventListener('click', ()=>{
+    panel.style.display = 'none';
+    trendsAbortToken++; // let any in-flight fetch's result be silently dropped
+  });
+  let dragging = false, startX, startY, startLeft, startTop;
+  h3.addEventListener('pointerdown', e=>{
+    if(e.target.id==='trendsClose') return;
+    const rect = panel.getBoundingClientRect();
+    panel.style.left = rect.left+'px'; panel.style.top = rect.top+'px';
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+    startX = e.clientX; startY = e.clientY; startLeft = rect.left; startTop = rect.top;
+    dragging = true;
+    h3.setPointerCapture(e.pointerId);
+  });
+  h3.addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    panel.style.left = (startLeft + (e.clientX - startX))+'px';
+    panel.style.top = (startTop + (e.clientY - startY))+'px';
+  });
+  h3.addEventListener('pointerup', ()=>{ dragging = false; });
+})();
+
 // Real satellite tiles need their own pane -- the dark-mode CSS filter
 // (invert+hue-rotate, see .leaflet-tile-pane above) is meant only to turn
 // OSM's light basemap dark. Leaflet puts ALL tile layers in the same shared
@@ -494,7 +755,7 @@ map.getPane('goesPane').style.zIndex = 350; // above tiles(200), below overlays(
 // (verified: clicking CLEAR fired a stray point query in the Aleutians, at
 // whatever lat/lon happened to be under that screen pixel). Tell Leaflet to
 // stop click/scroll events on these from ever reaching the map itself.
-['sidebar','err','pointCard','empty','searchErr','loading','nexradLegendPanel'].forEach(id=>{
+['sidebar','err','pointCard','empty','searchErr','loading','nexradLegendPanel','trendsPanel'].forEach(id=>{
   const el = document.getElementById(id);
   if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); }
 });
@@ -504,6 +765,12 @@ map.getPane('goesPane').style.zIndex = 350; // above tiles(200), below overlays(
 function stationPopupHtml(s, distLabel){
   const stale = isStale(s.valid_utc);
   const dirTxt = s.dir_deg!=null ? Math.round(s.dir_deg)+'°' : '—';
+  // Fuel moisture/temp are real fields only RAWS carries (every RAWS unit
+  // reports them; no other network here has a fuel stick) -- shown only
+  // when actually present rather than a blank row on every other station.
+  const fuelRows = (s.fuel_moisture_pct!=null || s.fuel_temp_f!=null) ?
+    '<div class="row"><span>Fuel Moisture</span><b>'+fmt(s.fuel_moisture_pct,'%',1)+'</b></div>'+
+    '<div class="row"><span>Fuel Temp</span><b>'+fmt(s.fuel_temp_f,'°F',0)+'</b></div>' : '';
   return '<div class="pop"><div class="pk">'+s.network+'</div><h4>'+(s.name||s.id)+'</h4>'+
     '<div class="pc">'+s.dist_mi+' mi from '+distLabel+' · '+fmt(s.elevation_ft,' ft',0)+' elev</div>'+
     '<div class="row"><span>Sustained</span><b>'+fmt(s.wind_mph,' mph',1)+'</b></div>'+
@@ -512,6 +779,7 @@ function stationPopupHtml(s, distLabel){
     '<div class="row"><span>Temp</span><b>'+fmt(s.temp_f,'°F',0)+'</b></div>'+
     '<div class="row"><span>RH</span><b>'+fmt(s.relh_pct,'%',0)+'</b></div>'+
     '<div class="row"><span>Visibility</span><b>'+fmt(s.vis_mi,' mi',1)+'</b></div>'+
+    fuelRows+
     (stale?'<div class="stale">⚠ STALE — last report '+s.valid_utc+'</div>':
       '<div class="row" style="margin-top:5px"><span>Valid</span><b>'+(s.valid_utc||'—')+'</b></div>')+
     '</div>';
@@ -1348,6 +1616,7 @@ const pointLayer = L.layerGroup().addTo(map);
 let currentStationMarkers = []; // {marker, family}
 let currentLayerGroup = null;
 const netState = {};
+let lastStations = [], lastSnotel = []; // for the Trends panel -- always the current query's raw lists
 
 // ---- GOES satellite (NASA GIBS WMTS, real live tiles -- confirmed the
 // current layer IDs and URL template directly against GIBS's own
@@ -1854,6 +2123,9 @@ function clearSatelliteLayers(){
 function renderStationLayers(stations, snotel, soundings, cameras, viirs, modis, nexrad, targetLayerGroup, distLabel, generatedUtc, qLat, qLon){
   currentStationMarkers = [];
   currentLayerGroup = targetLayerGroup;
+  lastStations = stations || []; lastSnotel = snotel || [];
+  trendsCache = null; // a new query means a new station set -- don't serve stale trends
+  refreshTrendsAvailability();
   const netLayersEl = document.getElementById('netLayers');
   const fireDetLayersEl = document.getElementById('fireDetLayers');
   netLayersEl.innerHTML = '';

@@ -42,6 +42,8 @@ from perimeter import fetch_perimeter
 from snotel import fetch_wind_stations, fetch_latest_wind
 import igra
 import spc_sounding
+import raws
+import mt_mesonet
 import iteris_rwis
 import viirs_fire
 import firms_active_fire
@@ -218,6 +220,30 @@ def _fetch_stations(lat, lon, radius_km, states):
                     "valid_utc": obs.get("utc_valid"),
                 })
     return stations_out
+
+
+def _fetch_raws(lat, lon, radius_km):
+    """Real live RAWS (fire-weather) stations nationwide -- doesn't depend
+    on `states` at all (NIFC's FeatureServer takes a direct geometry+
+    distance query), so this can start immediately alongside soundings/
+    NEXRAD/active-fire rather than waiting on the states lookup. Adds a
+    `dist_mi` field (the ArcGIS query already filters by radius, but the
+    dashboard's popup expects distance to be present, same as every other
+    station source)."""
+    radius_mi = radius_km * 0.621371
+    stations = raws.fetch_nearby(lat, lon, radius_mi)
+    for s in stations:
+        s["dist_mi"] = round(_haversine_km(lat, lon, s["lat"], s["lon"]) * 0.621371, 1)
+    return stations
+
+
+def _fetch_mt_mesonet(lat, lon, radius_km, states):
+    """Montana's own richer state network -- only fetched when the query
+    actually touches Montana, same gating convention as the Iteris DOT
+    camera feed below."""
+    if "MT" not in states:
+        return []
+    return mt_mesonet.fetch_wind_stations_nearby(lat, lon, radius_km * 0.621371)
 
 
 def _fetch_snotel(lat, lon, radius_km, states):
@@ -478,22 +504,31 @@ def sensors_around_point(lat: float, lon: float, radius_km: float = 120.7008, po
     # Soundings don't depend on `states` at all -- start them immediately,
     # in parallel with the states lookup itself, not just with the two
     # branches that do depend on it.
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with ThreadPoolExecutor(max_workers=8) as ex:
         soundings_f = ex.submit(_fetch_soundings, lat, lon)
         active_fire_f = ex.submit(_fetch_active_fire, lat, lon, radius_km, region)
-        # NEXRAD doesn't depend on `states` either (the registry fetch is
-        # nationwide + cached, see nexrad_stations.py) -- start it immediately
-        # alongside soundings/active-fire rather than waiting on the states
-        # lookup like the two branches below do.
+        # NEXRAD and RAWS don't depend on `states` either (NEXRAD's registry
+        # fetch is nationwide + cached; RAWS's FeatureServer takes a direct
+        # geometry+distance query) -- start both immediately alongside
+        # soundings/active-fire rather than waiting on the states lookup
+        # like the three branches below do.
         nexrad_f = ex.submit(_fetch_nexrad, lat, lon)
+        raws_f = ex.submit(_fetch_raws, lat, lon, radius_km)
         states = nearby_states(lat, lon, radius_km)
         stations_f = ex.submit(_fetch_stations, lat, lon, radius_km, states)
         snotel_f = ex.submit(_fetch_snotel, lat, lon, radius_km, states)
         cameras_f = ex.submit(_fetch_iteris_cameras, lat, lon, radius_km, states)
-        stations, snotel, soundings, cameras, active_fire, nexrad = (
+        mt_mesonet_f = ex.submit(_fetch_mt_mesonet, lat, lon, radius_km, states)
+        stations, snotel, soundings, cameras, active_fire, nexrad, raws_stations, mt_mesonet_stations = (
             stations_f.result(), snotel_f.result(), soundings_f.result(), cameras_f.result(),
-            active_fire_f.result(), nexrad_f.result()
+            active_fire_f.result(), nexrad_f.result(), raws_f.result(), mt_mesonet_f.result()
         )
+        # RAWS and Montana Mesonet are real, distinct station networks, but
+        # the dashboard already renders any station via its generic
+        # ASOS/RWIS/DCP marker pipeline keyed only on `network` -- appending
+        # here means zero dashboard signature changes, just new FAMILY_
+        # COLORS/LABELS entries for "RAWS"/"MTMESO".
+        stations = stations + raws_stations + mt_mesonet_stations
     return {
         "point": {"lat": lat, "lon": lon, "region": region, "radius_mi": round(radius_km * 0.621371)},
         "stations": stations,

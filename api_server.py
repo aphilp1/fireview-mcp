@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent / "recorder"))
 from build_sensor_snapshot import sensors_around_point, build_snapshot
 from fire_resolution import AmbiguousFireError, FireResolutionError
 import orbital_tracks
+import trends
 
 DEFAULT_RADIUS_KM = 120.7008  # exactly 75 mi
 
@@ -44,7 +45,7 @@ class PointQueryHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_cors_and_nocache_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
@@ -124,6 +125,32 @@ class PointQueryHandler(http.server.BaseHTTPRequestHandler):
             return
         self._send_json(200, result)
 
+    def _handle_trends(self):
+        # POST, not GET+querystring -- the real payload is a per-network
+        # list of station ids the client already resolved from its own
+        # last /api/point or /api/fire response, which can be a few dozen
+        # entries across several networks. RAWS/MDTCAM/etc. are silently
+        # ignored if the client includes them (trends.build_network_trends
+        # only recognizes the networks it has a real historical source
+        # for) -- no error needed for an unsupported network, it just
+        # contributes nothing.
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            self._send_json(400, {"error": "invalid JSON body"})
+            return
+        networks = body.get("networks")
+        if not isinstance(networks, dict):
+            self._send_json(400, {"error": "body must be {\"networks\": {network: [station_ids]}}"})
+            return
+        try:
+            result = trends.build_network_trends(networks)
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+            return
+        self._send_json(200, result)
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
@@ -133,6 +160,13 @@ class PointQueryHandler(http.server.BaseHTTPRequestHandler):
             self._handle_fire(qs)
         elif parsed.path == "/api/tle":
             self._handle_tle()
+        else:
+            self._send_json(404, {"error": f"unknown route: {parsed.path}"})
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/trends":
+            self._handle_trends()
         else:
             self._send_json(404, {"error": f"unknown route: {parsed.path}"})
 

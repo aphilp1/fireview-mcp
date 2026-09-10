@@ -37,8 +37,12 @@ click-to-query so panning doesn't trigger repeat queries.
 
 1. **Ground Sensors** — real-time surface wind stations within 75 mi:
    Airport (ASOS), Remote Sensor (DCP), Road Weather (RWIS) via IEM Mesonet;
-   SNOTEL ridge-wind stations via NRCS AWDB; State DOT road cameras
-   (currently Montana and South Dakota, via the Iteris ATIS platform).
+   RAWS (fire-weather stations, nationwide, including real fuel moisture/
+   temperature where reported); Montana's own state Mesonet (231 stations,
+   Montana queries only — a richer, separate network from IEM's MT_* feed,
+   see `recorder/mt_mesonet.py`); SNOTEL ridge-wind stations via NRCS AWDB;
+   State DOT road cameras (currently Montana and South Dakota, via the
+   Iteris ATIS platform).
 2. **Radiosonde Soundings** — every real upper-air site within 300 miles,
    with a dead-reckoned ascent flight track per site (real wind/height data
    where available, physical standard-atmosphere estimates elsewhere,
@@ -83,16 +87,58 @@ cycle with the checkbox state correct throughout, and zero console errors.
 
 **Fire perimeter** — the real WFIGS-mapped polygon when available.
 
+### Ground Sensor Trends
+
+A "📈 View Trends" button (Sensor Systems panel, enabled whenever the current
+query has qualifying stations) opens a draggable, closeable panel with real
+historical charts — wind, gust, temp, RH — combined into one area-averaged
+line per sensor type (Airport/Road Weather/Remote Sensor/Montana
+Mesonet/SNOTEL), switchable across four windows: 6h, 24h, 15d, 30d.
+
+**Combining, not per-station:** each line is the real average across every
+currently-reporting station of that type within the 75-mile radius, not one
+representative station. A timestamp where only some stations reported still
+averages just those; a timestamp with no real reports from any station is a
+real gap in the line — never interpolated or estimated.
+
+**Two real data paths per network**, because the underlying APIs differ:
+6h/24h windows are hourly bins from each network's raw observations; 15d/30d
+windows are daily bins. For the IEM networks (Airport/Road Weather/Remote
+Sensor) specifically, IEM's daily archive has no separate daily-average
+temp/RH field, only min/max — the 15d/30d temp/RH value is the midpoint of
+that real day's recorded min/max, a labeled derived approximation, not a
+fabricated observation. Wind/gust at daily granularity are IEM's own real
+daily average/max.
+
+**RAWS has no trend line** — no real, keyless historical archive for it was
+found. WRCC's own historical system requires a password beyond ~90 days
+with no verified station-id crosswalk to NIFC's live feed; NOAA's
+`weather.gov/wrh/timeseries` tool works but only by spoofing a Synoptic API
+key that's embedded in a public weather.gov JS file for weather.gov's own
+use — explicitly ruled out as out of scope for this project. RAWS still
+shows full live current conditions, including real fuel moisture/
+temperature, on the map itself; it's just absent from the trend panel.
+
+**Performance:** the backend has no batched historical endpoint for IEM, so
+each of the three IEM networks is capped at 15 representative stations for
+the combined average (SNOTEL and Montana Mesonet have no such cap — both
+support real batched multi-station queries). The first `/api/trends` fetch
+after a new search/query is the only one that hits the network — it already
+returns all four windows in one response, so switching between them
+afterward is instant, cached client-side until the next search/query.
+
 ## Backend
 
 - `build_sensor_snapshot.py` — `sensors_around_point(lat, lon, radius_km)`
   is the reusable core (every fetch layer parallelized). `build_snapshot
   (fire_name, radius_km)` wraps it with WFIGS fire resolution + perimeter.
 - `api_server.py` — a small `ThreadingHTTPServer`, CORS + no-cache,
-  `/api/fire`, `/api/point`, `/api/tle`.
+  `/api/fire`, `/api/point`, `/api/tle` (GET), `/api/trends` (POST — real
+  historical ground-sensor data, see `recorder/trends.py`).
 - `recorder/` — one module per real data source (WFIGS, IEM Mesonet, NRCS
   AWDB, NWS/SPC/IGRA soundings, Iteris state DOT cameras, NASA FIRMS,
-  CelesTrak).
+  CelesTrak, NIFC RAWS, Montana Mesonet, `trends.py` for real historical
+  ground-sensor data).
 
 ## Known gaps
 
