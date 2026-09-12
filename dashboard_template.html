@@ -171,6 +171,32 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
    "shouting" instead of a quiet section label. */
 .layerGroupLabel{font-family:"IBM Plex Mono";font-size:10px;font-weight:500;letter-spacing:.07em;color:var(--ink);opacity:.62;text-transform:uppercase;margin:18px 0 7px;padding-bottom:0;border-bottom:none}
 .layerGroupLabel:first-child{margin-top:0}
+/* Each Sensor Systems group is its own independently collapsible section
+   now (was: everything always expanded in one long scroll) -- closed by
+   default except Ground Sensors, so opening the panel isn't an immediate
+   wall of every toggle at once. Same quiet section-label voice as
+   .layerGroupLabel above, just made clickable with a rotating chevron. */
+.sensorSection{margin:14px 0}
+.sensorSection:first-child{margin-top:0}
+.sensorSectionHead{font-family:"IBM Plex Mono";font-size:10px;font-weight:500;letter-spacing:.07em;
+  color:var(--ink);opacity:.75;text-transform:uppercase;display:flex;align-items:center;gap:6px;
+  cursor:pointer;user-select:none;padding:2px 0}
+.sensorSectionHead:hover{opacity:1}
+.sensorSectionChevron{display:inline-block;transition:transform .15s;font-size:9px;color:var(--slate)}
+.sensorSection.collapsed .sensorSectionChevron{transform:rotate(-90deg)}
+.sensorSectionBody{margin-top:7px}
+.sensorSection.collapsed .sensorSectionBody{display:none}
+#sensorAttribution{font-family:"IBM Plex Mono";font-size:8.5px;line-height:1.6;color:var(--mute);
+  border:1px solid var(--line);border-radius:6px;padding:7px 9px;margin-top:14px}
+/* DATA STATUS panel -- a real per-source health/freshness readout, modeled
+   on the same idea RapidWatch's Live Event tab uses (a colored dot + a
+   concrete number per source, not a decorative status light). */
+.dstat-row{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:11px}
+.dstat-dot{width:7px;height:7px;border-radius:50%;flex:none;box-shadow:0 0 5px 1px currentColor}
+.dstat-lbl{color:var(--slate);flex:1}
+.dstat-val{font-family:"IBM Plex Mono";font-size:9.5px;color:var(--ink);text-align:right;white-space:nowrap}
+.dstat-note{font-family:"IBM Plex Mono";font-size:8px;color:var(--mute);line-height:1.5;
+  border-top:1px solid var(--line);margin-top:8px;padding-top:7px}
 .sat-anim-row{display:flex;align-items:center;gap:8px;padding:6px 0 2px 19px}
 .sat-anim-row .clr{width:auto;margin:0;padding:4px 11px;flex:none}
 #goesAnimTime,#nexradAnimTime{font-size:10.5px;font-weight:500;color:var(--ink);min-width:0}
@@ -277,20 +303,42 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
       <div class="panel" id="legend" style="display:none">
         <h3><span class="sq"></span><span class="panel-title-text">SENSOR SYSTEMS</span></h3>
         <div class="panel-body">
-        <div class="layerGroupLabel">Ground Sensors</div>
-        <div id="netLayers"></div>
-        <button id="trendsBtn" class="clr" style="margin:2px 0 6px" disabled>📈 View Trends</button>
-        <div class="layerGroupLabel">Radiosonde Soundings</div>
-        <div id="sondeList"></div>
-        <div class="layerGroupLabel">Active Fire Detections</div>
-        <div id="fireDetLayers"></div>
-        <div class="layerGroupLabel">NEXRAD Radar</div>
-        <div id="nexradLayers"></div>
-        <div id="satLabel" class="layerGroupLabel"></div>
-        <div id="satLayers"></div>
+        <div class="sensorSection" data-section="ground">
+          <div class="sensorSectionHead"><span class="sensorSectionChevron">▾</span>Ground Sensors</div>
+          <div class="sensorSectionBody">
+            <div id="netLayers"></div>
+            <button id="trendsBtn" class="clr" style="margin:2px 0 6px" disabled>📈 View Trends</button>
+          </div>
+        </div>
+        <div class="sensorSection collapsed" data-section="sonde">
+          <div class="sensorSectionHead"><span class="sensorSectionChevron">▾</span>Radiosonde Soundings</div>
+          <div class="sensorSectionBody"><div id="sondeList"></div></div>
+        </div>
+        <div class="sensorSection collapsed" data-section="firedet">
+          <div class="sensorSectionHead"><span class="sensorSectionChevron">▾</span>Active Fire Detections</div>
+          <div class="sensorSectionBody"><div id="fireDetLayers"></div></div>
+        </div>
+        <div class="sensorSection collapsed" data-section="nexrad">
+          <div class="sensorSectionHead"><span class="sensorSectionChevron">▾</span>NEXRAD Radar</div>
+          <div class="sensorSectionBody"><div id="nexradLayers"></div></div>
+        </div>
+        <div class="sensorSection collapsed" data-section="satellite">
+          <div class="sensorSectionHead"><span class="sensorSectionChevron">▾</span><span id="satLabel">Satellite</span></div>
+          <div class="sensorSectionBody"><div id="satLayers"></div></div>
+        </div>
         <div id="statCount">loading stations…</div>
+        <div id="sensorAttribution">
+          Airport/Road Weather/Remote Sensor: IEM Mesonet · Fire weather: NIFC RAWS · Montana: MT Mesonet ·
+          Snow: NRCS SNOTEL · Soundings: NWS/SPC/IGRA · Fire detections: NASA FIRMS · Radar: NOAA NEXRAD ·
+          Satellite: NASA GIBS/GOES-R
+        </div>
         </div>
       </div>
+    </div>
+    <div class="panel" id="dataStatusPanel" style="display:none;top:230px;right:14px;width:240px;padding:11px 14px">
+      <h3><span class="sq" style="background:var(--aqua)"></span><span class="panel-title-text">DATA STATUS</span></h3>
+      <div class="panel-body" id="dataStatusBody"></div>
+      <div class="dstat-note">Read from this query's own live response — not a separate check.</div>
     </div>
     <div class="panel" id="nexradLegendPanel" style="display:none;bottom:60px;right:14px;width:528px;padding:10px 14px">
       <h3><span class="sq" style="background:var(--sky)"></span><span class="panel-title-text">NEXRAD LEGEND</span></h3>
@@ -498,6 +546,17 @@ setQueryArmed(true);
   });
   h3.addEventListener('pointerup', ()=>{ dragging = false; });
 })();
+
+// ---- Sensor Systems inner groups: each one independently collapsible
+// (Ground Sensors open by default, the rest closed) -- was one long
+// always-expanded scroll before. Content inside each group's body is still
+// populated exactly as before by the existing render functions; this only
+// wraps the show/hide, so no other code needed to change. ----
+document.querySelectorAll('.sensorSectionHead').forEach(head=>{
+  head.addEventListener('click', ()=>{
+    head.closest('.sensorSection').classList.toggle('collapsed');
+  });
+});
 
 // ---- NEXRAD LEGEND panel: draggable by its header, same convention as the
 // Sensor Systems panel above -- per the user's ask to be able to move it
@@ -755,7 +814,7 @@ map.getPane('goesPane').style.zIndex = 350; // above tiles(200), below overlays(
 // (verified: clicking CLEAR fired a stray point query in the Aleutians, at
 // whatever lat/lon happened to be under that screen pixel). Tell Leaflet to
 // stop click/scroll events on these from ever reaching the map itself.
-['sidebar','err','pointCard','empty','searchErr','loading','nexradLegendPanel','trendsPanel'].forEach(id=>{
+['sidebar','err','pointCard','empty','searchErr','loading','nexradLegendPanel','trendsPanel','dataStatusPanel'].forEach(id=>{
   const el = document.getElementById(id);
   if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); }
 });
@@ -2218,12 +2277,53 @@ function renderStationLayers(stations, snotel, soundings, cameras, viirs, modis,
     liveCount+' live, '+(stations.length-liveCount)+' stale (>150 min)'+
     (generatedUtc ? ' · updated '+generatedUtc : '');
   document.getElementById('legend').style.display='block';
+
+  renderDataStatus(stations, snotel, soundings, viirs, modis, nexrad);
+}
+
+// ---- DATA STATUS panel: a real per-source health/freshness summary, one
+// row per data category with a colored dot + a real concise readout --
+// every number here is read from the same response already rendered
+// above, not a separate check. Real status, not decorative: green means
+// this category actually returned live data just now, amber means what it
+// returned is real but running behind (IGRA's 1-2 day lag), grey means a
+// real, honest zero/empty result for this query (not a fetch failure). ----
+function dataStatusRow(color, label, value){
+  return '<div class="dstat-row"><span class="dstat-dot" style="background:'+color+';color:'+color+'"></span>'+
+    '<span class="dstat-lbl">'+label+'</span><span class="dstat-val">'+value+'</span></div>';
+}
+function renderDataStatus(stations, snotel, soundings, viirs, modis, nexrad){
+  const panel = document.getElementById('dataStatusPanel');
+  const body = document.getElementById('dataStatusBody');
+  let html = '';
+
+  const groundTotal = stations.length + (snotel||[]).length;
+  const groundLive = stations.filter(s=>!isStale(s.valid_utc)).length + (snotel||[]).length; // SNOTEL has no valid_utc (station-local time), can't isStale-check it the same way -- counted as reporting since fetch_latest_wind already drops non-reporting stations
+  html += dataStatusRow(groundTotal ? (groundLive ? 'var(--aqua)' : 'var(--amber)') : 'var(--mute)',
+    'Ground Sensors', groundTotal ? (groundLive+'/'+groundTotal+' live') : 'none in radius');
+
+  const sondes = (soundings||[]).filter(s=>s.status==='ok');
+  const nearImmediate = sondes.filter(s=>s.source && !s.source.startsWith('IGRA')).length;
+  html += dataStatusRow(!sondes.length ? 'var(--mute)' : nearImmediate ? 'var(--aqua)' : 'var(--amber)',
+    'Soundings', sondes.length ? sondes.length+' site'+(sondes.length===1?'':'s')+(nearImmediate<sondes.length?' (some IGRA lag)':'') : 'none in range');
+
+  const fireHits = (viirs||[]).length + (modis||[]).length;
+  html += dataStatusRow('var(--aqua)', 'Fire Detect.', fireHits+' hit'+(fireHits===1?'':'s')+' (24h)');
+
+  html += dataStatusRow((nexrad||[]).length ? 'var(--aqua)' : 'var(--mute)', 'NEXRAD',
+    (nexrad||[]).length ? (nexrad||[]).length+' station'+((nexrad||[]).length===1?'':'s') : 'none in radius');
+
+  html += dataStatusRow('var(--aqua)', 'Satellite', 'GOES/MODIS/Landsat live');
+
+  body.innerHTML = html;
+  panel.style.display = 'block';
 }
 
 function clearStationLayers(){
   currentStationMarkers = [];
   currentLayerGroup = null;
   document.getElementById('legend').style.display='none';
+  document.getElementById('dataStatusPanel').style.display='none';
   document.getElementById('netLayers').innerHTML='';
   document.getElementById('fireDetLayers').innerHTML='';
   document.getElementById('nexradLayers').innerHTML='';
