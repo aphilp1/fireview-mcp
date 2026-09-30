@@ -459,6 +459,36 @@ const usgsTopoBase = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/se
 const hillshadeBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',{
   attribution:'Esri World Hillshade (elevation-derived)', maxNativeZoom:16, maxZoom:18, pane:'realTerrainPane'
 });
+// ---- Lubrecht Experimental Forest map -- the user: "include the map as a
+// layer ... under OpenStreet, USGS, and Hillshade." A static georeferenced
+// image (UM forest boundary on 30 m SRTM shaded relief, 500 ft contours, HQ
+// star), cropped to its plot frame from the Lubrecht Test Range deck's
+// terrain map. Bounds were measured from the image's own graticule ticks
+// (lon 113.55..113.30 W at x=201..1704, lat 46.96..46.84 N at y=10..1065 in
+// the uncropped 1890x1305 image; frame at x=142..1885, y=2..1230) and
+// extended to the frame edges. Tick spacing ratio is 1.4624 vs
+// 1/cos(46.89 deg)=1.4633, i.e. the image is lat/lon-linear, so a plain
+// imageOverlay is exact to about a pixel over this 0.14 deg span.
+// Own pane: escapes the tile-pane invert filter (same reason as goesPane),
+// sits above GOES (350) and below vectors (400) and markers (600) so the
+// station markers and radius circle still draw on top of it.
+map.createPane('lubrechtPane');
+map.getPane('lubrechtPane').style.zIndex = 360;
+const LUBRECHT_BOUNDS = [[46.82123,-113.55981],[46.96091,-113.26989]];
+const lubrechtMap = L.imageOverlay('lubrecht_terrain_map.png', LUBRECHT_BOUNDS, {
+  pane:'lubrechtPane', opacity:1, interactive:false,
+  attribution:'Lubrecht map: UM forest boundary on 30 m SRTM'
+});
+// Turning it on from a CONUS-wide view would otherwise show nothing visible
+// (the forest is ~14 mi across, a few pixels at zoom 4) -- fly to it unless
+// it is already in view at a zoom where it is actually legible. A pure
+// bounds.contains() check is not enough: at the default zoom-4 view the
+// forest IS "contained" and nothing happened (caught in the live check).
+map.on('overlayadd', e=>{
+  if(e.layer!==lubrechtMap) return;
+  const inView = map.getBounds().contains(L.latLngBounds(LUBRECHT_BOUNDS));
+  if(!inView || map.getZoom() < 10) map.fitBounds(LUBRECHT_BOUNDS,{padding:[20,20]});
+});
 // "Add the base layer box below the zoom in and zoom out buttons on top
 // right" -- Leaflet stacks same-position controls in add order, so adding
 // this right after zoom puts it directly beneath it.
@@ -466,7 +496,7 @@ L.control.layers({
   'OpenStreetMap': osmBase,
   'USGS Topo (relief + contours)': usgsTopoBase,
   'Hillshade (elevation relief)': hillshadeBase
-}, null, {position:'topright', collapsed:false}).addTo(map);
+}, {'Lubrecht Forest map': lubrechtMap}, {position:'topright', collapsed:false}).addTo(map);
 const NorthArrow = L.Control.extend({options:{position:'topleft'},
   onAdd(){const d=L.DomUtil.create('div','rw-north');
     d.innerHTML='<div class="rw-arrow">▲</div><div class="rw-n">N</div>';
