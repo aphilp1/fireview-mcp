@@ -127,11 +127,24 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
 #trendsPanel h3 .sq{width:8px;height:8px;border-radius:2px}
 #trendsClose:hover{color:var(--ink)}
 .trend-chart{margin-bottom:14px}
-.trend-chart-title{font-family:"IBM Plex Mono";font-size:10px;letter-spacing:.06em;color:var(--slate);margin-bottom:4px;text-transform:uppercase}
+.trend-chart-title{font-family:"IBM Plex Mono";font-size:10px;letter-spacing:.06em;color:var(--ink);margin-bottom:4px;text-transform:uppercase}
 .trend-chart svg{width:100%;height:90px;display:block}
 .trend-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:3px}
-.trend-legend span{display:inline-flex;align-items:center;gap:4px;font-family:"IBM Plex Mono";font-size:9.5px;color:var(--slate)}
+.trend-legend span{display:inline-flex;align-items:center;gap:4px;font-family:"IBM Plex Mono";font-size:9.5px;color:var(--ink)}
 .trend-legend .sw{width:9px;height:9px;border-radius:2px;display:inline-block}
+.trend-chart svg path.trend-hit,.trend-chart svg path.trend-line{cursor:pointer}
+.trend-chart svg path.trend-line.sel{stroke-width:3}
+.trend-readout{display:none;margin-top:4px;font-family:"IBM Plex Mono";font-size:10px;color:var(--ink);align-items:center;gap:6px;font-weight:500}
+.trend-readout.on{display:flex}
+.trend-readout .sw{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none}
+#trendsProgress{display:none;margin:2px 0 10px}
+#trendsProgress.on{display:block}
+#trendsProgressBar{height:7px;border:1px solid var(--line-2);border-radius:4px;background:rgba(255,255,255,.05);overflow:hidden}
+#trendsProgressFill{height:100%;width:0;background:var(--lime);transition:width .25s linear}
+#trendsProgressText{font-family:"IBM Plex Mono";font-size:10px;color:var(--ink);font-weight:500;margin:6px 0 4px}
+.trend-prog-row{display:flex;gap:8px;font-family:"IBM Plex Mono";font-size:9.5px;color:var(--ink);line-height:1.7}
+.trend-prog-row .st{width:78px;flex:none}
+.trend-prog-row .st.done{color:var(--lime)}.trend-prog-row .st.run{color:var(--aqua)}.trend-prog-row .st.fail{color:var(--coral)}
 .nexrad-legend-sub{margin-bottom:8px}
 .nexrad-legend-sub:last-child{margin-bottom:0}
 .nexrad-legend-label{font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink);opacity:.75;margin-bottom:4px}
@@ -356,7 +369,7 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
     <div class="panel" id="trendsPanel" style="display:none;top:70px;left:340px;width:520px;max-height:80vh;padding:10px 14px;overflow-y:auto">
       <h3><span class="sq" style="background:var(--lime)"></span><span class="panel-title-text">GROUND SENSOR TRENDS</span><span id="trendsClose" style="margin-left:auto;cursor:pointer;padding:0 4px">✕</span></h3>
       <div class="panel-body">
-        <div id="trendsExplain" style="font-size:10.5px;color:var(--slate);line-height:1.5;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+        <div id="trendsExplain" style="font-size:10.5px;color:var(--ink);line-height:1.5;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)">
           Each line is a real <b style="color:var(--ink)">area average</b> across every currently-reporting station of that
           sensor type within the 75mi radius — not one representative station. A timestamp where only some stations
           reported still shows the average of just those; a timestamp with no real reports from any station is left as a
@@ -373,7 +386,8 @@ header .coords{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color
           full live current conditions, including fuel moisture, on the map itself.
         </div>
         <div id="trendsWindowRow" class="sat-speed-row"></div>
-        <div id="trendsStatus" style="font-family:'IBM Plex Mono';font-size:10px;color:var(--slate);margin:4px 0 8px">—</div>
+        <div id="trendsStatus" style="font-family:'IBM Plex Mono';font-size:10px;color:var(--ink);margin:4px 0 8px">—</div>
+        <div id="trendsProgress"><div id="trendsProgressBar"><div id="trendsProgressFill"></div></div><div id="trendsProgressText"></div><div id="trendsProgressRows"></div></div>
         <div id="trendsCharts"></div>
       </div>
     </div>
@@ -662,10 +676,10 @@ function trendTimeLabel(t){
   return d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
 }
 
-function trendChartSvg(seriesByNetwork, unit){
+function trendChartSvg(seriesByNetwork, varKey){
   const W = 480, H = 104, padL = 30, padR = 6, padT = 6, padB = 30;
   const allPoints = Object.values(seriesByNetwork).flat();
-  if(!allPoints.length) return '<div style="font-size:10px;color:var(--mute);padding:6px 0">No data in this window</div>';
+  if(!allPoints.length) return '<div style="font-size:10px;color:var(--ink);padding:6px 0">No data in this window</div>';
   const ts = allPoints.map(p=>new Date(p.t).getTime());
   const vs = allPoints.map(p=>p.value);
   const tMin = Math.min(...ts), tMax = Math.max(...ts);
@@ -675,12 +689,12 @@ function trendChartSvg(seriesByNetwork, unit){
   vMin -= vPad; vMax += vPad;
   const x = t => padL + (tMax>tMin ? (t-tMin)/(tMax-tMin) : 0.5) * (W-padL-padR);
   const y = v => padT + (1 - (v-vMin)/(vMax-vMin)) * (H-padT-padB);
-  let svg = '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">';
+  let svg = '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" data-var="'+varKey+'" data-tmin="'+tMin+'" data-tmax="'+tMax+'" data-vmin="'+vMin+'" data-vmax="'+vMax+'">';
   // gridlines + axis labels (min/max only, keeps it uncluttered)
   svg += '<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(H-padB)+'" stroke="var(--line)" stroke-width="1"/>';
   svg += '<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="var(--line)" stroke-width="1"/>';
-  svg += '<text x="2" y="'+(y(vMax)+3)+'" font-size="8" fill="var(--mute)">'+vMax.toFixed(0)+'</text>';
-  svg += '<text x="2" y="'+(y(vMin)+3)+'" font-size="8" fill="var(--mute)">'+vMin.toFixed(0)+'</text>';
+  svg += '<text x="2" y="'+(y(vMax)+3)+'" font-size="8" fill="var(--ink)">'+vMax.toFixed(0)+'</text>';
+  svg += '<text x="2" y="'+(y(vMin)+3)+'" font-size="8" fill="var(--ink)">'+vMin.toFixed(0)+'</text>';
   // x-axis: start/mid/end real timestamps from the actual data, not an
   // assumed window boundary -- a real gap at either end (e.g. SNOTEL's
   // telemetry lag) means the true data span is narrower than the nominal
@@ -688,14 +702,18 @@ function trendChartSvg(seriesByNetwork, unit){
   const tMid = tMin + (tMax-tMin)/2;
   [[tMin,'start'],[tMid,'middle'],[tMax,'end']].forEach(([t,anchor])=>{
     const anchorAttr = anchor==='start' ? 'start' : anchor==='end' ? 'end' : 'middle';
-    svg += '<text x="'+x(t).toFixed(1)+'" y="'+(H-padB+11)+'" font-size="8" fill="var(--mute)" text-anchor="'+anchorAttr+'">'+trendTimeLabel(t)+'</text>';
+    svg += '<text x="'+x(t).toFixed(1)+'" y="'+(H-padB+11)+'" font-size="8" fill="var(--ink)" text-anchor="'+anchorAttr+'">'+trendTimeLabel(t)+'</text>';
   });
-  Object.entries(seriesByNetwork).forEach(([net, pts])=>{
-    if(!pts.length) return;
-    const color = familyColor(networkFamily(net));
-    const d = pts.map((p,i)=>(i===0?'M':'L')+x(new Date(p.t).getTime()).toFixed(1)+','+y(p.value).toFixed(1)).join(' ');
-    svg += '<path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.6"/>';
-  });
+  // Each line gets a wide transparent twin underneath (all twins drawn
+  // first, so no hit path sits on top of another family's visible line) --
+  // a 1.6px stroke is not realistically clickable on its own.
+  const paths = Object.entries(seriesByNetwork).filter(([,pts])=>pts.length).map(([net, pts])=>({
+    net, color: familyColor(networkFamily(net)),
+    d: pts.map((p,i)=>(i===0?'M':'L')+x(new Date(p.t).getTime()).toFixed(1)+','+y(p.value).toFixed(1)).join(' '),
+  }));
+  paths.forEach(p=>{ svg += '<path d="'+p.d+'" fill="none" stroke="transparent" stroke-width="14" class="trend-hit" data-fam="'+p.net+'"/>'; });
+  paths.forEach(p=>{ svg += '<path d="'+p.d+'" fill="none" stroke="'+p.color+'" stroke-width="1.6" class="trend-line" data-fam="'+p.net+'"/>'; });
+  svg += '<circle class="trend-pt" r="3.5" fill="var(--ink)" stroke="var(--panel)" stroke-width="1.5" style="display:none"/>';
   svg += '</svg>';
   return svg;
 }
@@ -729,52 +747,133 @@ function mergeByFamily(data, varKey){
   return seriesByFamily;
 }
 
+let trendsRendered = {}; // varKey -> seriesByFamily of the last render, for the click-a-line readout
 function renderTrendCharts(data){
   const el = document.getElementById('trendsCharts');
   const networks = Object.keys(data);
-  if(!networks.length){ el.innerHTML = '<div style="font-size:11px;color:var(--mute)">No supported ground-sensor networks in this query.</div>'; return; }
+  if(!networks.length){ el.innerHTML = '<div style="font-size:11px;color:var(--ink)">No supported ground-sensor networks in this query.</div>'; return; }
   let html = '';
+  trendsRendered = {};
   TRENDS_VARS.forEach(v=>{
     const seriesByFamily = mergeByFamily(data, v.key);
+    trendsRendered[v.key] = seriesByFamily;
     const legend = Object.keys(seriesByFamily).filter(f=>seriesByFamily[f].length).map(f=>
       '<span><span class="sw" style="background:'+familyColor(f)+'"></span>'+familyLabel(f)+'</span>'
     ).join('');
     html += '<div class="trend-chart"><div class="trend-chart-title">'+v.label+'</div>'+
       trendChartSvg(seriesByFamily, v.key)+
       (legend?'<div class="trend-legend">'+legend+'</div>':'')+
+      '<div class="trend-readout"></div>'+
       '</div>';
   });
   el.innerHTML = html;
 }
 
+// Station counts actually sent per network in the last fetch (IEM families
+// capped at TRENDS_IEM_CAP, mirroring recorder/trends.py's IEM_STATION_CAP)
+// -- used for the progress bar weighting and the click-a-line readout.
+const TRENDS_IEM_CAP = 15;
+let trendsStationsUsed = {};
+function trendsUsedCount(net, ids){
+  const fam = networkFamily(net);
+  return (fam==='ASOS'||fam==='RWIS'||fam==='DCP') ? Math.min(ids.length, TRENDS_IEM_CAP) : ids.length;
+}
+function trendsNetworkLabel(net){
+  const parts = net.split('_');
+  return familyLabel(networkFamily(net)) + (parts.length>1 ? ' · '+parts[0] : '');
+}
+function fmtSecs(s){ return s < 10 ? s.toFixed(1)+'s' : Math.round(s)+'s'; }
+
 async function ensureTrendsData(){
   if(trendsCache) return trendsCache;
   const statusEl = document.getElementById('trendsStatus');
+  const progEl = document.getElementById('trendsProgress');
+  const fillEl = document.getElementById('trendsProgressFill');
+  const textEl = document.getElementById('trendsProgressText');
+  const rowsEl = document.getElementById('trendsProgressRows');
   const networks = buildTrendsNetworksPayload();
-  if(!Object.keys(networks).length){
+  const names = Object.keys(networks);
+  if(!names.length){
     statusEl.textContent = 'No supported ground-sensor networks in this query.';
     document.getElementById('trendsCharts').innerHTML = '';
     return null;
   }
   const myToken = ++trendsAbortToken;
-  statusEl.textContent = 'Fetching real historical data… (IEM networks are ~15s/network — this is the only fetch; switching 6h/24h/15d/30d after this is instant, re-fetched only on your next search/query)';
-  try{
-    const r = await fetch(API_BASE+'/api/trends', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({networks}),
-    });
-    if(myToken !== trendsAbortToken) return null; // a newer request superseded this one
-    if(!r.ok){ statusEl.textContent = 'Trends fetch failed: HTTP '+r.status; return null; }
-    const data = await r.json();
-    if(myToken !== trendsAbortToken) return null;
-    trendsCache = data;
-    statusEl.textContent = 'Loaded '+new Date().toLocaleTimeString()+' — cached until your next search/query.';
-    return data;
-  }catch(e){
-    if(myToken !== trendsAbortToken) return null;
-    statusEl.textContent = 'Trends fetch failed: '+e.message;
+  // One /api/trends request PER NETWORK, in sequence -- same endpoint, same
+  // per-network load on IEM/SNOTEL/Montana Mesonet as the old single request
+  // (the backend already ran the networks one after another), but now the
+  // page knows exactly where the fetch is. The bar is weighted by station
+  // count because fetch time scales with stations (IEM is one request per
+  // station per day/month). The remaining-time figure is computed from this
+  // fetch's own measured seconds-per-station so far, not a canned number.
+  const used = {}; names.forEach(n=>used[n] = trendsUsedCount(n, networks[n]));
+  trendsStationsUsed = used;
+  const totalSt = names.reduce((a,n)=>a+used[n], 0);
+  const state = {}; names.forEach(n=>state[n] = {st:'wait', secs:null});
+  const t0 = performance.now();
+  let doneSt = 0, doneSecs = 0, curNet = null, curStart = 0;
+  function renderRows(){
+    rowsEl.innerHTML = names.map(n=>{
+      const s = state[n];
+      const lbl = s.st==='done' ? 'done '+fmtSecs(s.secs) : s.st==='run' ? 'fetching…' : s.st==='fail' ? 'failed' : 'waiting';
+      const extra = networks[n].length>used[n] ? ' of '+networks[n].length : '';
+      return '<div class="trend-prog-row"><span class="st '+s.st+'">'+lbl+'</span><span>'+trendsNetworkLabel(n)+' · '+used[n]+' station'+(used[n]===1?'':'s')+extra+'</span></div>';
+    }).join('');
+  }
+  function tick(){
+    const elapsed = (performance.now()-t0)/1000;
+    const nDone = names.filter(n=>state[n].st==='done'||state[n].st==='fail').length;
+    let est, prog = doneSt;
+    if(doneSt>0 && doneSecs>0){
+      const secPerSt = doneSecs/doneSt;
+      const curSpent = curNet ? (performance.now()-curStart)/1000 : 0;
+      est = '~'+fmtSecs(Math.max(0, (totalSt-doneSt)*secPerSt - curSpent))+' left';
+      if(curNet) prog += Math.min(used[curNet]*0.95, curSpent/secPerSt);
+    } else {
+      est = 'estimate after first network';
+    }
+    fillEl.style.width = (totalSt ? Math.min(100, prog/totalSt*100) : 0).toFixed(1)+'%';
+    textEl.textContent = nDone+' of '+names.length+' networks · '+doneSt+' of '+totalSt+' stations · '+fmtSecs(elapsed)+' elapsed · '+est;
+  }
+  statusEl.textContent = 'Fetching real historical data, one network at a time. This is the only fetch — all four windows (6h/24h/15d/30d) arrive together, so switching windows afterward is instant.';
+  progEl.classList.add('on'); fillEl.style.width = '0%'; renderRows(); tick();
+  const timer = setInterval(()=>{ if(myToken !== trendsAbortToken){ clearInterval(timer); return; } tick(); }, 250);
+  const merged = {};
+  let failed = 0;
+  for(const net of names){
+    if(myToken !== trendsAbortToken) break;
+    state[net].st = 'run'; curNet = net; curStart = performance.now(); renderRows();
+    try{
+      const r = await fetch(API_BASE+'/api/trends', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({networks: {[net]: networks[net]}}),
+      });
+      if(myToken !== trendsAbortToken) break;
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const part = await r.json();
+      if(myToken !== trendsAbortToken) break;
+      Object.assign(merged, part);
+      state[net].st = 'done';
+    }catch(e){
+      if(myToken !== trendsAbortToken) break;
+      state[net].st = 'fail'; failed++;
+    }
+    state[net].secs = (performance.now()-curStart)/1000;
+    doneSt += used[net]; doneSecs += state[net].secs; curNet = null;
+    renderRows(); tick();
+    if(Object.keys(merged).length) renderTrendCharts(merged); // charts fill in as each network lands
+  }
+  clearInterval(timer);
+  if(myToken !== trendsAbortToken) return null; // closed/superseded mid-fetch: drop it, re-fetch on next open
+  progEl.classList.remove('on');
+  const total = (performance.now()-t0)/1000;
+  if(!Object.keys(merged).length){
+    statusEl.textContent = 'Trends fetch failed for every network ('+failed+' of '+names.length+').';
     return null;
   }
+  trendsCache = merged;
+  statusEl.textContent = 'Loaded '+new Date().toLocaleTimeString()+' — '+names.length+' network'+(names.length===1?'':'s')+' in '+fmtSecs(total)+(failed ? ' ('+failed+' failed)' : '')+' — cached until your next search/query. Click any line to identify it.';
+  return merged;
 }
 
 async function fetchAndRenderTrends(){
@@ -804,6 +903,35 @@ async function fetchAndRenderTrends(){
   document.getElementById('trendsBtn').addEventListener('click', ()=>{
     panel.style.display = 'block';
     fetchAndRenderTrends();
+  });
+  // Click a line -> which sensor family it is, how many stations feed that
+  // average, and the real value/time at the nearest plotted point. Nearest
+  // point is found on the chart's own time axis (inverse of the x() mapping
+  // in trendChartSvg), using the same data-tmin/tmax the SVG was drawn with.
+  document.getElementById('trendsCharts').addEventListener('click', e=>{
+    const hit = e.target.closest('path.trend-hit, path.trend-line');
+    if(!hit) return;
+    const svg = hit.closest('svg'), fam = hit.dataset.fam, varKey = svg.dataset.var;
+    const pts = (trendsRendered[varKey]||{})[fam] || [];
+    if(!pts.length) return;
+    const W = 480, H = 104, padL = 30, padR = 6, padT = 6, padB = 30;
+    const tMin = +svg.dataset.tmin, tMax = +svg.dataset.tmax, vMin = +svg.dataset.vmin, vMax = +svg.dataset.vmax;
+    const rect = svg.getBoundingClientRect();
+    const vbX = (e.clientX-rect.left)/rect.width*W;
+    const tClick = tMax>tMin ? tMin + (vbX-padL)/(W-padL-padR)*(tMax-tMin) : tMin;
+    let best = pts[0], bestD = Infinity;
+    pts.forEach(p=>{ const d = Math.abs(new Date(p.t).getTime()-tClick); if(d<bestD){ bestD = d; best = p; } });
+    const cx = padL + (tMax>tMin ? (new Date(best.t).getTime()-tMin)/(tMax-tMin) : 0.5)*(W-padL-padR);
+    const cy = padT + (1-(best.value-vMin)/(vMax-vMin))*(H-padT-padB);
+    svg.querySelectorAll('path.trend-line').forEach(p=>p.classList.toggle('sel', p.dataset.fam===fam));
+    const dot = svg.querySelector('circle.trend-pt');
+    dot.setAttribute('cx', cx.toFixed(1)); dot.setAttribute('cy', cy.toFixed(1)); dot.style.display = '';
+    const nSt = Object.keys(trendsStationsUsed).filter(n=>networkFamily(n)===fam).reduce((a,n)=>a+trendsStationsUsed[n], 0);
+    const v = TRENDS_VARS.find(x=>x.key===varKey) || {label: varKey};
+    const unit = (v.label.match(/\((.*)\)/)||[])[1] || '';
+    const ro = svg.closest('.trend-chart').querySelector('.trend-readout');
+    ro.innerHTML = '<span class="sw" style="background:'+familyColor(fam)+'"></span><span>'+familyLabel(fam)+' · average of up to '+nSt+' station'+(nSt===1?'':'s')+' · '+best.value.toFixed(1)+' '+unit+' at '+trendTimeLabel(best.t)+'</span>';
+    ro.classList.add('on');
   });
   document.getElementById('trendsClose').addEventListener('click', ()=>{
     panel.style.display = 'none';
